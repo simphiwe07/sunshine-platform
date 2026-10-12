@@ -25,6 +25,16 @@ variable "github_repository" {
   }
 }
 
+variable "github_repository_ids" {
+  description = "Owner and repo numeric IDs. Required for repos created after 2026-07-15, whose OIDC sub claim embeds them. Get them with: gh api repos/OWNER/REPO --jq '{owner_id: .owner.id, repo_id: .id}'"
+
+  type = object({
+    owner_id = number
+    repo_id  = number
+  })
+  default = null
+}
+
 variable "github_environment" {
   description = "GitHub environment whose jobs may assume the apply role."
   type        = string
