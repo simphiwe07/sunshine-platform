@@ -1,0 +1,17 @@
+# Start a lab session: creates the hourly-billed platform stack.
+name: lab-up
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  apply:
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      stack: terraform/envs/lab/platform
+      command: apply

@@ -1,0 +1,18 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# bootstrap holds your email - keep it local
+terraform/bootstrap/terraform.tfvars
+
+.DS_Store
+.idea/
+.vscode/

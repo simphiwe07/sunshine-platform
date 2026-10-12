@@ -1,0 +1,67 @@
+# Pull requests: format, lint, security scan, then plan every lab stack.
+name: ci
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/**"
+      - ".tflint.hcl"
+      - ".checkov.yaml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: fmt / tflint / checkov
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.x"
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff terraform
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: tflint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tflint --init --config "$GITHUB_WORKSPACE/.tflint.hcl"
+          tflint --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl" --format compact
+
+      - name: checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform
+          framework: terraform
+          config_file: .checkov.yaml
+
+  plan:
+    name: plan
+    needs: static
+    strategy:
+      fail-fast: false
+      matrix:
+        stack:
+          - terraform/envs/lab/foundation
+          - terraform/envs/lab/platform
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      stack: ${{ matrix.stack }}
+      command: plan

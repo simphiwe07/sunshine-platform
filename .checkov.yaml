@@ -1,0 +1,7 @@
+# Exceptions live next to the resource as "#checkov:skip=ID:reason" comments,
+# so every accepted risk is documented where it is made.
+framework:
+  - terraform
+compact: true
+quiet: true
+download-external-modules: false

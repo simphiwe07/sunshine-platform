@@ -1,0 +1,20 @@
+# End a lab session. Also runs every night at 20:00 SAST (18:00 UTC)
+# so a forgotten lab never burns credits overnight.
+name: lab-down
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * *"
+
+permissions: {}
+
+jobs:
+  destroy:
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      stack: terraform/envs/lab/platform
+      command: destroy

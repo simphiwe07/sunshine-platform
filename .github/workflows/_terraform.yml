@@ -1,0 +1,126 @@
+# Reusable: plan / apply / destroy one Terraform stack.
+# plan            -> read-only role, no environment (PRs and main)
+# apply / destroy -> apply role, runs in GitHub environment "lab" (main branch only)
+name: terraform
+
+on:
+  workflow_call:
+    inputs:
+      stack:
+        description: Path to the stack, e.g. terraform/envs/lab/platform
+        required: true
+        type: string
+      command:
+        description: plan | apply | destroy
+        required: true
+        type: string
+
+permissions: {}
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_VERSION: "1.x"
+
+jobs:
+  plan:
+    if: inputs.command == 'plan'
+    name: plan (${{ inputs.stack }})
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.stack }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-session-name: gha-plan-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: init
+        run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      - name: validate
+        run: terraform validate
+
+      - name: plan
+        run: |
+          terraform plan -lock-timeout=5m -out=tfplan
+          {
+            echo "### Plan: \`${{ inputs.stack }}\`"
+            echo '```'
+            terraform show -no-color tfplan | tail -c 60000
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  execute:
+    if: inputs.command == 'apply' || inputs.command == 'destroy'
+    name: ${{ inputs.command }} (${{ inputs.stack }})
+    runs-on: ubuntu-latest
+    environment: lab
+    concurrency:
+      group: tf-${{ inputs.stack }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      COMMAND: ${{ inputs.command }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.stack }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          role-session-name: gha-${{ inputs.command }}-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: init
+        run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      - name: plan
+        run: |
+          if [ "$COMMAND" = "destroy" ]; then
+            terraform plan -destroy -lock-timeout=5m -out=tfplan
+          else
+            terraform plan -lock-timeout=5m -out=tfplan
+          fi
+          {
+            echo "### ${COMMAND}: \`${{ inputs.stack }}\`"
+            echo '```'
+            terraform show -no-color tfplan | tail -c 60000
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: ${{ inputs.command }}
+        run: terraform apply -lock-timeout=5m tfplan
+
+      - name: outputs
+        if: inputs.command == 'apply'
+        run: |
+          {
+            echo "### Outputs"
+            echo '```'
+            terraform output -no-color
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

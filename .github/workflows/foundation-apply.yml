@@ -1,0 +1,22 @@
+# The persistent DNS layer applies automatically when it changes on main.
+name: foundation-apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/envs/lab/foundation/**"
+      - "terraform/modules/dns/**"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  apply:
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      stack: terraform/envs/lab/foundation
+      command: apply
