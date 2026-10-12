@@ -12,10 +12,10 @@ terraform {
   # Step 2: uncomment, then run:
   #   terraform init -migrate-state -backend-config="bucket=<state_bucket output>"
   #
-  # backend "s3" {
-  #   key          = "bootstrap/terraform.tfstate"
-  #   region       = "eu-west-1"
-  #   use_lockfile = true
-  #   encrypt      = true
-  # }
+   backend "s3" {
+     key          = "bootstrap/terraform.tfstate"
+     region       = "eu-west-1"
+     use_lockfile = true
+     encrypt      = true
+   }
 }
