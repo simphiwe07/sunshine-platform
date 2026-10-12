@@ -1,5 +1,5 @@
 # Copy to terraform.tfvars (git-ignored) and fill in.
-github_repository  = "your-github-user/sunshine-platform"
+github_repository  = "simphiwe07/sunshine-platform"
 alert_email        = "you@example.com"
 monthly_budget_usd = 25
 daily_budget_usd   = 4

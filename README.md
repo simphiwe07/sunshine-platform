@@ -39,7 +39,7 @@ No long-lived AWS keys exist anywhere, including GitHub secrets.
 - Enable IAM Identity Center, create your user, assign `AdministratorAccess`. If the free plan blocks it, use an IAM admin user with MFA instead.
 - `aws configure sso --profile sunshine` then `aws sso login --profile sunshine`.
 
-**2. Create the GitHub repo** (e.g. `sunshine-platform`, private is fine) and push this code.
+**2. Create the GitHub repo** `simphiwe07/sunshine-platform` (empty, no README) and push this code.
 
 **3. Bootstrap**
 ```bash
