@@ -113,6 +113,7 @@ resource "aws_route_table_association" "public" {
 # Single NAT in the first AZ: a deliberate lab cost trade-off.
 # Production would run one NAT per AZ so an AZ outage cannot cut egress.
 resource "aws_eip" "nat" {
+  #checkov:skip=CKV2_AWS_19:EIP is attached to the NAT gateway, not an EC2 instance
   count  = var.enable_nat_gateway ? 1 : 0
   domain = "vpc"
 
