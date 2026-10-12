@@ -11,6 +11,17 @@ resource "aws_iam_openid_connect_provider" "github" {
 
 locals {
   oidc_host = "token.actions.githubusercontent.com"
+  gh_owner  = split("/", var.github_repository)[0]
+  gh_repo   = split("/", var.github_repository)[1]
+
+  # Repos created after 2026-07-15 get immutable IDs in the OIDC sub claim:
+  #   repo:<owner>@<owner_id>/<repo>@<repo_id>:<context>
+  # Older repos keep repo:<owner>/<repo>:<context>.
+  gh_subject = (
+    var.github_repository_ids == null
+    ? "repo:${var.github_repository}"
+    : "repo:${local.gh_owner}@${var.github_repository_ids.owner_id}/${local.gh_repo}@${var.github_repository_ids.repo_id}"
+  )
 }
 
 # ---------- plan role ----------
@@ -35,8 +46,8 @@ data "aws_iam_policy_document" "plan_trust" {
       variable = "${local.oidc_host}:sub"
 
       values = [
-        "repo:${var.github_repository}:pull_request",
-        "repo:${var.github_repository}:ref:refs/heads/main",
+        "${local.gh_subject}:pull_request",
+        "${local.gh_subject}:ref:refs/heads/main",
       ]
     }
   }
@@ -89,7 +100,7 @@ data "aws_iam_policy_document" "apply_trust" {
     condition {
       test     = "StringEquals"
       variable = "${local.oidc_host}:sub"
-      values   = ["repo:${var.github_repository}:environment:${var.github_environment}"]
+      values   = ["${local.gh_subject}:environment:${var.github_environment}"]
     }
   }
 }

@@ -1,5 +1,12 @@
 # Copy to terraform.tfvars (git-ignored) and fill in.
 github_repository  = "simphiwe07/sunshine-platform"
+
+# gh api repos/simphiwe07/sunshine-platform --jq '{owner_id: .owner.id, repo_id: .id}'
+github_repository_ids = {
+  owner_id = 0 # CHANGE ME
+  repo_id  = 0 # CHANGE ME
+}
+
 alert_email        = "you@example.com"
 monthly_budget_usd = 25
 daily_budget_usd   = 4
