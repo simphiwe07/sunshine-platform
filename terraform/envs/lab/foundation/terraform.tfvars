@@ -1,4 +1,4 @@
 # Not secret - committed on purpose.
-domain_name          = "lab.example.com" # CHANGE ME
+domain_name          = "simptechit.click"
 create_zone          = true
 validate_certificate = false
