@@ -34,6 +34,15 @@ resource "aws_vpc" "this" {
   tags = merge(var.tags, { Name = var.name })
 }
 
+# Manage the VPC's main route table so it stays local-only. Any subnet without
+# an explicit association falls back to it, so nobody may add routes here.
+resource "aws_default_route_table" "this" {
+  default_route_table_id = aws_vpc.this.default_route_table_id
+  route                  = []
+
+  tags = merge(var.tags, { Name = "${var.name}-main-unused" })
+}
+
 # Strip all rules from the default SG so nothing lands in it by accident.
 resource "aws_default_security_group" "this" {
   vpc_id = aws_vpc.this.id
