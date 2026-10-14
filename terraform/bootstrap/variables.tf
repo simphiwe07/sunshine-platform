@@ -57,3 +57,9 @@ variable "daily_budget_usd" {
   type        = number
   default     = 4
 }
+
+variable "account_access_reference_role" {
+  description = "Existing role assignable via Account Access Manager whose trust policy is reused for human roles."
+  type        = string
+  default     = "AccountFullAccessRole"
+}
