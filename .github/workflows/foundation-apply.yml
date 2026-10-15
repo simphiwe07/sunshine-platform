@@ -1,4 +1,4 @@
-# The persistent DNS layer applies automatically when it changes on main.
+# The persistent layer (DNS, container registry) applies automatically when it changes on main.
 name: foundation-apply
 
 on:

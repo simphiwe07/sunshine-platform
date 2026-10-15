@@ -17,9 +17,10 @@ output "github_variables" {
   description = "Paste into GitHub > Settings > Secrets and variables > Actions > Variables."
 
   value = {
-    AWS_REGION         = var.region
-    TF_STATE_BUCKET    = aws_s3_bucket.tfstate.id
-    AWS_PLAN_ROLE_ARN  = aws_iam_role.plan.arn
-    AWS_APPLY_ROLE_ARN = aws_iam_role.apply.arn
+    AWS_REGION            = var.region
+    TF_STATE_BUCKET       = aws_s3_bucket.tfstate.id
+    AWS_PLAN_ROLE_ARN     = aws_iam_role.plan.arn
+    AWS_APPLY_ROLE_ARN    = aws_iam_role.apply.arn
+    AWS_ECR_PUSH_ROLE_ARN = aws_iam_role.ecr_push.arn
   }
 }
