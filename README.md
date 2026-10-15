@@ -68,7 +68,7 @@ Set `domain_name` in `terraform/envs/lab/foundation/terraform.tfvars`, open a PR
 
 ## Daily loop
 
-1. **Actions → lab-up → Run** (≈3 min for phase 2).
+1. **Actions → lab-up → Run** (≈15 min with RDS + ECS; set `enable_database`/`enable_app = false` in `platform/terraform.tfvars` to skip them).
 2. Work. Changes go through PRs; `ci` plans them.
 3. **Actions → lab-down → Run** when done. It also runs every night at 20:00 SAST.
 
@@ -85,15 +85,16 @@ Commit `.terraform.lock.hcl` after your first local init so CI uses the same pro
 ## Cost guardrails
 
 - Budgets measure spend **before credits**: monthly ($25, alerts at 50/80/100% + forecast) and daily ($4) — a forgotten EKS cluster trips the daily one within a day.
-- Phase 2 running cost is basically the NAT gateway + its public IP (~$0.05/hr). Set `enable_nat_gateway = false` when you don't need egress.
+- Running cost with everything on is about $0.12/hr: NAT (~$0.05), ALB + 2 public IPs (~$0.035), RDS t4g.micro (~$0.02), 2 small Fargate tasks with one on Spot (~$0.015). Each piece has an `enable_*` toggle.
 - Deliberate lab trade-offs (each documented as an inline `#checkov:skip`): single NAT, SSE-S3 instead of KMS CMKs, no DNSSEC/query logging, no S3 replication.
 
 ## Roadmap
 
 - [x] 1. Account baseline + CI identity
 - [x] 2. Network + DNS
-- [ ] 3. Data: RDS Postgres (private, Secrets Manager-managed password), S3 app bucket
-- [ ] 4. ECS Fargate service behind ALB, HTTPS with the wildcard cert
+- [x] 3. Data: RDS Postgres (private, Secrets Manager-managed password), S3 app bucket
+- [x] 4. ECS Fargate service behind ALB, HTTPS with the wildcard cert (on-demand base + Spot, autoscaling, ECS Exec)
+- [ ] 4b. Own container image: ECR, build/scan/push workflow, DB secret injected into the task
 - [ ] 5. EKS: spot node group, AWS LB Controller, ExternalDNS, External Secrets, NLB service
 - [ ] 6. Identity: Cognito/Keycloak OIDC login, K8s RBAC mapped to IAM roles
 - [ ] 7. Hardening: WAF, image signing/scanning gates, runbooks

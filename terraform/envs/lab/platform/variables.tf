@@ -38,3 +38,20 @@ variable "enable_database" {
   type        = bool
   default     = true
 }
+
+variable "domain_name" {
+  description = "Hosted zone + wildcard cert created by the foundation stack."
+  type        = string
+  default     = "simptechit.click"
+}
+
+variable "enable_app" {
+  description = "Create the ECS Fargate service behind an HTTPS ALB (~$0.04/hr)."
+  type        = bool
+  default     = true
+}
+
+variable "app_subdomain" {
+  type    = string
+  default = "app"
+}

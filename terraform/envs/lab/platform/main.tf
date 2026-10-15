@@ -22,8 +22,41 @@ module "data" {
   ephemeral           = true
 }
 
-# Roadmap - each phase adds a module call here:
-#   phase 4: module "ecs"   (Fargate service behind ALB)
-#   phase 5: module "eks"   (cluster, spot node group, LB controller, ExternalDNS)
-# Foundation outputs (zone, cert) are read with data sources, not remote state,
-# so the two stacks stay decoupled.
+# Foundation owns the zone and the wildcard cert. Platform looks them up with
+# data sources (not terraform_remote_state), so the stacks stay decoupled:
+# platform needs only read access to Route 53/ACM, not to foundation's state.
+data "aws_route53_zone" "this" {
+  name         = var.domain_name
+  private_zone = false
+}
+
+data "aws_acm_certificate" "wildcard" {
+  domain      = var.domain_name
+  statuses    = ["ISSUED"]
+  most_recent = true
+}
+
+module "app" {
+  source = "../../../modules/ecs-service"
+  count  = var.enable_app ? 1 : 0
+
+  name               = "${local.name}-app"
+  vpc_id             = module.network.vpc_id
+  public_subnet_ids  = module.network.public_subnet_ids
+  private_subnet_ids = module.network.private_subnet_ids
+
+  hostname        = "${var.app_subdomain}.${var.domain_name}"
+  zone_id         = data.aws_route53_zone.this.zone_id
+  certificate_arn = data.aws_acm_certificate.wildcard.arn
+
+  # Tasks also carry the data-tier app SG, which is what the DB SG trusts.
+  extra_security_group_ids = [module.data.app_security_group_id]
+  app_bucket_arn           = module.data.app_bucket_arn
+
+  # DB_HOST is null (and dropped) when enable_database = false.
+  environment = { for k, v in { DB_HOST = module.data.db_address } : k => v if v != null }
+}
+
+# Roadmap:
+#   phase 4b: own container image (ECR + build/scan/push workflow), DB secret injected
+#   phase 5:  module "eks" (cluster, spot node group, LB controller, ExternalDNS)

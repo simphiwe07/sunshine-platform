@@ -37,3 +37,19 @@ output "db_master_secret_arn" {
 output "app_bucket_name" {
   value = module.data.app_bucket_name
 }
+
+output "app_url" {
+  value = try(module.app[0].url, null)
+}
+
+output "alb_dns_name" {
+  value = try(module.app[0].alb_dns_name, null)
+}
+
+output "ecs_cluster_name" {
+  value = try(module.app[0].cluster_name, null)
+}
+
+output "ecs_service_name" {
+  value = try(module.app[0].service_name, null)
+}
