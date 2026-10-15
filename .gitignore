@@ -16,3 +16,9 @@ terraform/bootstrap/terraform.tfvars
 .DS_Store
 .idea/
 .vscode/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

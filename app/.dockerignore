@@ -1,0 +1,4 @@
+# Only main.py and requirements.txt go into the image.
+*
+!main.py
+!requirements.txt
