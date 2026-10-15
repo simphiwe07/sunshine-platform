@@ -26,7 +26,6 @@ resource "aws_ecs_cluster_capacity_providers" "this" {
 }
 
 resource "aws_ecs_task_definition" "this" {
-  #checkov:skip=CKV_AWS_336:Stock nginx writes to /var/cache and /etc/nginx at start; read-only root comes with our own image in phase 4b
   family                   = var.name
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc" # each task gets its own ENI + security groups
@@ -45,6 +44,10 @@ resource "aws_ecs_task_definition" "this" {
       name      = "app"
       image     = var.container_image
       essential = true
+
+      # An attacker who gets code execution cannot modify the container's files.
+      # Trade-off: ECS Exec needs a writable root fs, so the two are mutually exclusive.
+      readonlyRootFilesystem = !var.enable_execute_command
 
       portMappings = [{
         containerPort = var.container_port

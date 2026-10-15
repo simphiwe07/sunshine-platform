@@ -125,9 +125,9 @@ variable "on_demand_base" {
 }
 
 variable "enable_execute_command" {
-  description = "ECS Exec: shell into running containers via SSM, no SSH or bastion."
+  description = "ECS Exec: shell into running containers via SSM, no SSH or bastion. Turning it on also turns off the read-only root filesystem (the SSM agent must write to it)."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "log_retention_days" {

@@ -82,6 +82,15 @@ terraform plan
 Commit `.terraform.lock.hcl` after your first local init so CI uses the same provider versions:
 `terraform providers lock -platform=linux_amd64 -platform=darwin_arm64`
 
+## Shipping the app
+
+1. Change code in `app/`, open a PR: **app** workflow runs tests, hadolint, build, Trivy scan and a container smoke test - with no AWS access.
+2. Merge: the same pipeline pushes the scanned image to ECR as `sunshine-app:<git sha>` (immutable tag).
+3. **lab-up**: the platform stack deploys the newest image *by digest*; ECS rolls it out (circuit breaker + rollback), and the smoke test fails the run if the live version isn't the one just deployed.
+4. Roll back: set `app_image_tag = "<older sha>"` in `platform/terraform.tfvars` and run lab-up.
+
+Debugging a task: set `enable_ecs_exec = true` (this also makes the root filesystem writable - the two are mutually exclusive), run lab-up, then `aws ecs execute-command ...`.
+
 ## Cost guardrails
 
 - Budgets measure spend **before credits**: monthly ($25, alerts at 50/80/100% + forecast) and daily ($4) — a forgotten EKS cluster trips the daily one within a day.
@@ -94,7 +103,7 @@ Commit `.terraform.lock.hcl` after your first local init so CI uses the same pro
 - [x] 2. Network + DNS
 - [x] 3. Data: RDS Postgres (private, Secrets Manager-managed password), S3 app bucket
 - [x] 4. ECS Fargate service behind ALB, HTTPS with the wildcard cert (on-demand base + Spot, autoscaling, ECS Exec)
-- [ ] 4b. Own container image: ECR, build/scan/push workflow, DB secret injected into the task
+- [x] 4b. Own container image: ECR, test/scan/push pipeline, image pinned by digest, DB secret injected, smoke test
 - [ ] 5. EKS: spot node group, AWS LB Controller, ExternalDNS, External Secrets, NLB service
 - [ ] 6. Identity: Cognito/Keycloak OIDC login, K8s RBAC mapped to IAM roles
 - [ ] 7. Hardening: WAF, image signing/scanning gates, runbooks

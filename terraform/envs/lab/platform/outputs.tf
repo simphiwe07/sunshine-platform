@@ -53,3 +53,8 @@ output "ecs_cluster_name" {
 output "ecs_service_name" {
   value = try(module.app[0].service_name, null)
 }
+
+output "app_version" {
+  description = "Git SHA of the deployed image (the smoke test checks the live app reports it)."
+  value       = try([for t in data.aws_ecr_image.app[0].image_tags : t if length(t) == 40][0], null)
+}

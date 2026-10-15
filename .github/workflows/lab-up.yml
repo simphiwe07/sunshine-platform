@@ -1,4 +1,5 @@
-# Start a lab session: creates the hourly-billed platform stack.
+# Start a lab session: creates the hourly-billed platform stack, then proves the
+# app is up, can reach its database, and runs the image that was just deployed.
 name: lab-up
 
 on:
@@ -15,3 +16,48 @@ jobs:
     with:
       stack: terraform/envs/lab/platform
       command: apply
+
+  smoke:
+    name: smoke test
+    needs: apply
+    if: needs.apply.outputs.app_url != ''
+    runs-on: ubuntu-24.04
+    permissions: {}
+    env:
+      URL: ${{ needs.apply.outputs.app_url }}
+      EXPECTED: ${{ needs.apply.outputs.app_version }}
+    steps:
+      - name: reachable over HTTPS, running the expected version
+        run: |
+          # New DNS record + ALB: allow a few minutes to become reachable.
+          for _ in $(seq 1 30); do
+            BODY=$(curl -fsS --max-time 5 "$URL/") && break
+            sleep 10
+          done
+          [ -n "${BODY:-}" ] || { echo "::error::$URL never answered"; exit 1; }
+          echo "$BODY"
+
+          # wait_for_steady_state means the rollout finished; if the live version
+          # differs, ECS rolled back (circuit breaker) and the deploy did NOT land.
+          if [ -n "$EXPECTED" ] && ! grep -q "\"version\":\"$EXPECTED\"" <<< "$BODY"; then
+            echo "::error::live version is not $EXPECTED - the deployment was rolled back"
+            exit 1
+          fi
+
+      - name: database reachable (readiness)
+        run: |
+          CODE=$(curl -sS -o body.json -w '%{http_code}' --max-time 10 "$URL/readyz")
+          cat body.json; echo
+          if grep -q 'not configured' body.json; then
+            echo "::notice::database disabled (enable_database = false) - skipping"
+          elif [ "$CODE" != "200" ]; then
+            echo "::error::/readyz returned $CODE"; exit 1
+          fi
+
+      - name: summary
+        run: |
+          {
+            echo "### Smoke test passed"
+            echo "- URL: $URL"
+            echo "- version: \`$EXPECTED\`"
+          } >> "$GITHUB_STEP_SUMMARY"

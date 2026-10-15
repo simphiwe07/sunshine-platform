@@ -55,3 +55,15 @@ variable "app_subdomain" {
   type    = string
   default = "app"
 }
+
+variable "app_image_tag" {
+  description = "Deploy this image tag (a git SHA) instead of the newest one - e.g. to roll back."
+  type        = string
+  default     = null
+}
+
+variable "enable_ecs_exec" {
+  description = "Allow shell access to tasks via ECS Exec. Also makes the root filesystem writable."
+  type        = bool
+  default     = false
+}

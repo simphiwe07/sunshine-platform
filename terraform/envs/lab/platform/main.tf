@@ -36,6 +36,28 @@ data "aws_acm_certificate" "wildcard" {
   most_recent = true
 }
 
+# The app image lives in the foundation ECR repo. Deploy the newest push - or a
+# specific tag via app_image_tag (rollback) - and reference it by DIGEST, so the
+# task definition points at exact, scanned bytes, never a movable tag.
+data "aws_ecr_repository" "app" {
+  count = var.enable_app ? 1 : 0
+  name  = "${var.project}-app"
+}
+
+data "aws_ecr_image" "app" {
+  count = var.enable_app ? 1 : 0
+
+  repository_name = data.aws_ecr_repository.app[0].name
+  image_tag       = var.app_image_tag
+  most_recent     = var.app_image_tag == null ? true : null
+}
+
+locals {
+  # "" instead of null when enable_database = false: null can't be interpolated
+  # into a string, even in a map entry that is filtered out afterwards.
+  db_secret_arn = module.data.db_master_secret_arn == null ? "" : module.data.db_master_secret_arn
+}
+
 module "app" {
   source = "../../../modules/ecs-service"
   count  = var.enable_app ? 1 : 0
@@ -49,14 +71,40 @@ module "app" {
   zone_id         = data.aws_route53_zone.this.zone_id
   certificate_arn = data.aws_acm_certificate.wildcard.arn
 
+  container_image   = "${data.aws_ecr_repository.app[0].repository_url}@${data.aws_ecr_image.app[0].image_digest}"
+  container_port    = 8080
+  health_check_path = "/healthz" # liveness only - a DB outage must not fail every task
+
   # Tasks also carry the data-tier app SG, which is what the DB SG trusts.
   extra_security_group_ids = [module.data.app_security_group_id]
   app_bucket_arn           = module.data.app_bucket_arn
 
-  # DB_HOST is null (and dropped) when enable_database = false.
-  environment = { for k, v in { DB_HOST = module.data.db_address } : k => v if v != null }
+  # "if var.enable_database" keeps the keys known at plan time even while the
+  # values (endpoint, secret ARN) are still unknown.
+  environment = merge(
+    {
+      AWS_REGION = var.region
+      APP_BUCKET = module.data.app_bucket_name
+    },
+    {
+      for k, v in {
+        DB_HOST = module.data.db_address
+        DB_NAME = module.data.db_name
+      } : k => v if var.enable_database
+    },
+  )
+
+  # Injected by ECS from Secrets Manager at task start. The execution role may
+  # read only this secret; the values never appear in Terraform state or logs.
+  secrets = {
+    for k, v in {
+      DB_USER     = "${local.db_secret_arn}:username::"
+      DB_PASSWORD = "${local.db_secret_arn}:password::"
+    } : k => v if var.enable_database
+  }
+
+  enable_execute_command = var.enable_ecs_exec
 }
 
 # Roadmap:
-#   phase 4b: own container image (ECR + build/scan/push workflow), DB secret injected
-#   phase 5:  module "eks" (cluster, spot node group, LB controller, ExternalDNS)
+#   phase 5: module "eks" (cluster, spot node group, LB controller, ExternalDNS)

@@ -14,6 +14,13 @@ on:
         description: plan | apply | destroy
         required: true
         type: string
+    outputs:
+      app_url:
+        description: Public URL of the app (platform stack only, empty otherwise)
+        value: ${{ jobs.execute.outputs.app_url }}
+      app_version:
+        description: Git SHA of the deployed image (platform stack only)
+        value: ${{ jobs.execute.outputs.app_version }}
 
 permissions: {}
 
@@ -69,6 +76,9 @@ jobs:
     name: ${{ inputs.command }} (${{ inputs.stack }})
     runs-on: ubuntu-latest
     environment: lab
+    outputs:
+      app_url: ${{ steps.tfout.outputs.app_url }}
+      app_version: ${{ steps.tfout.outputs.app_version }}
     concurrency:
       group: tf-${{ inputs.stack }}
       cancel-in-progress: false
@@ -116,8 +126,12 @@ jobs:
         run: terraform apply -lock-timeout=5m tfplan
 
       - name: outputs
+        id: tfout
         if: inputs.command == 'apply'
         run: |
+          # -raw fails on null/missing outputs -> empty string (e.g. foundation stack)
+          echo "app_url=$(terraform output -raw app_url 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+          echo "app_version=$(terraform output -raw app_version 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
           {
             echo "### Outputs"
             echo '```'
