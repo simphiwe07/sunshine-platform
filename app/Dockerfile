@@ -18,6 +18,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY --from=deps /install /usr/local
 
+# The runtime never installs packages: drop pip (and the ensurepip copy of it).
+# pip vendors its own urllib3/msgpack/setuptools, which scanners rightly flag.
+RUN python -m pip uninstall -y pip \
+ && rm -rf /usr/local/lib/python3.13/ensurepip
+
 # RDS CA bundle, so the app can verify the database certificate (sslmode=verify-full).
 ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/rds-ca.pem
 
