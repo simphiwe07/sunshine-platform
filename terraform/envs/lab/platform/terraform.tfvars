@@ -3,3 +3,4 @@ az_count           = 2
 enable_nat_gateway = true
 enable_flow_logs   = false
 enable_database    = true
+enable_app         = true
