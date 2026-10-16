@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sunshine-app
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  # No "replicas": the HPA owns the count (setting both makes them fight on every deploy).
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0 # never drop below current capacity during a deploy
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "app.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "app.selector" . | nindent 8 }}
+      annotations:
+        sunshine/chart-hash: {{ .Values.chartHash | quote }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      automountServiceAccountToken: false
+      # Longer than preStop + app shutdown, so in-flight requests finish.
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      # Spread across AZs and nodes: losing one Spot node or one AZ never takes
+      # out every replica. ScheduleAnyway = prefer, but still run if impossible.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "app.selector" . | nindent 14 }}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "app.selector" . | nindent 14 }}
+      containers:
+        - name: app
+          image: {{ required "image is required" .Values.image }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPort }}
+          env:
+            - name: AWS_REGION
+              value: {{ .Values.region | quote }}
+            - name: APP_BUCKET
+              value: {{ .Values.bucket | quote }}
+            {{- if .Values.database.enabled }}
+            - name: DB_HOST
+              value: {{ .Values.database.host | quote }}
+            - name: DB_NAME
+              value: {{ .Values.database.name | quote }}
+            # From the Kubernetes Secret that External Secrets syncs from Secrets Manager.
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: sunshine-db
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sunshine-db
+                  key: password
+            {{- end }}
+          # Readiness gates traffic; liveness restarts a hung process. Both use
+          # /healthz (no DB) so a database blip doesn't empty every endpoint.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          lifecycle:
+            # Keep serving while the ALB/NLB deregisters this pod; without it,
+            # scale-downs and Spot interruptions show up as 502s.
+            preStop:
+              exec:
+                command: ["sleep", "10"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

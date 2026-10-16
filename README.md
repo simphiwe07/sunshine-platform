@@ -91,10 +91,21 @@ Commit `.terraform.lock.hcl` after your first local init so CI uses the same pro
 
 Debugging a task: set `enable_ecs_exec = true` (this also makes the root filesystem writable - the two are mutually exclusive), run lab-up, then `aws ecs execute-command ...`.
 
+## EKS
+
+`enable_eks = true` in `platform/terraform.tfvars`, then **lab-up** (~25 min: cluster ~10, nodes ~3, controllers + app ~5, ALB/NLB + DNS ~3).
+
+- `platform` creates the cluster and everything AWS-side; `platform-k8s` installs the controllers (Helm) and the app chart (`deploy/charts/sunshine-app`).
+- App: `https://eks.<domain>` (ALB via Ingress) and `https://nlb.<domain>` (NLB via Service type LoadBalancer).
+- kubectl: `aws eks update-kubeconfig --name sunshine-lab --region eu-west-1 --profile sunshine`
+- **lab-down** deletes the Kubernetes-made load balancers first, then the k8s stack, then the platform.
+- Upgrades: [docs/runbooks/eks-upgrade.md](docs/runbooks/eks-upgrade.md).
+
 ## Cost guardrails
 
 - Budgets measure spend **before credits**: monthly ($25, alerts at 50/80/100% + forecast) and daily ($4) — a forgotten EKS cluster trips the daily one within a day.
-- Running cost with everything on is about $0.12/hr: NAT (~$0.05), ALB + 2 public IPs (~$0.035), RDS t4g.micro (~$0.02), 2 small Fargate tasks with one on Spot (~$0.015). Each piece has an `enable_*` toggle.
+- EKS adds ~$0.16/hr (control plane $0.10, 2 Spot nodes, ALB + NLB) - keep `enable_app = false` (ECS) while it runs.
+- Running cost with ECS on is about $0.12/hr: NAT (~$0.05), ALB + 2 public IPs (~$0.035), RDS t4g.micro (~$0.02), 2 small Fargate tasks with one on Spot (~$0.015). Each piece has an `enable_*` toggle.
 - Deliberate lab trade-offs (each documented as an inline `#checkov:skip`): single NAT, SSE-S3 instead of KMS CMKs, no DNSSEC/query logging, no S3 replication.
 
 ## Roadmap
@@ -104,6 +115,6 @@ Debugging a task: set `enable_ecs_exec = true` (this also makes the root filesys
 - [x] 3. Data: RDS Postgres (private, Secrets Manager-managed password), S3 app bucket
 - [x] 4. ECS Fargate service behind ALB, HTTPS with the wildcard cert (on-demand base + Spot, autoscaling, ECS Exec)
 - [x] 4b. Own container image: ECR, test/scan/push pipeline, image pinned by digest, DB secret injected, smoke test
-- [ ] 5. EKS: spot node group, AWS LB Controller, ExternalDNS, External Secrets, NLB service
+- [x] 5. EKS: Spot node group, access entries, Pod Identity, AWS LB Controller (ALB + NLB), ExternalDNS, External Secrets, HPA/PDB/NetworkPolicy - [upgrade runbook](docs/runbooks/eks-upgrade.md)
 - [ ] 6. Identity: Cognito/Keycloak OIDC login, K8s RBAC mapped to IAM roles
 - [ ] 7. Hardening: WAF, image signing/scanning gates, runbooks

@@ -1,0 +1,32 @@
+{{- if .Values.nlb.enabled }}
+# Same pods behind a Network Load Balancer (layer 4). TLS terminates on the NLB
+# with the wildcard cert; health checks still use HTTP /healthz.
+# loadBalancerClass makes the AWS Load Balancer Controller (not the legacy
+# in-tree cloud provider) own this load balancer.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sunshine-app-nlb
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-ssl-cert: {{ .Values.nlb.certificateArn }}
+    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "443"
+    service.beta.kubernetes.io/aws-load-balancer-ssl-negotiation-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: http
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: /healthz
+    service.beta.kubernetes.io/aws-load-balancer-target-group-attributes: deregistration_delay.timeout_seconds=30
+    external-dns.alpha.kubernetes.io/hostname: {{ .Values.nlb.host }}
+spec:
+  type: LoadBalancer
+  loadBalancerClass: service.k8s.aws/nlb
+  selector:
+    {{- include "app.selector" . | nindent 4 }}
+  ports:
+    - name: https
+      port: 443
+      targetPort: http
+      protocol: TCP
+{{- end }}

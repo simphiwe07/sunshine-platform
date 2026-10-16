@@ -1,5 +1,7 @@
-# Start a lab session: creates the hourly-billed platform stack, then proves the
-# app is up, can reach its database, and runs the image that was just deployed.
+# Start a lab session:
+#   1. platform      - network, database, ECS and/or EKS cluster (Terraform/AWS)
+#   2. platform-k8s  - controllers + app inside EKS (Helm), skipped if no cluster
+#   3. smoke tests   - each app is reachable, ready, and runs the deployed SHA
 name: lab-up
 
 on:
@@ -17,47 +19,35 @@ jobs:
       stack: terraform/envs/lab/platform
       command: apply
 
-  smoke:
-    name: smoke test
+  apply-k8s:
+    needs: apply
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      stack: terraform/envs/lab/platform-k8s
+      command: apply
+      skip_if_no_cluster: sunshine-lab
+
+  smoke-ecs:
+    name: smoke test (ECS)
     needs: apply
     if: needs.apply.outputs.app_url != ''
     runs-on: ubuntu-24.04
-    permissions: {}
-    env:
-      URL: ${{ needs.apply.outputs.app_url }}
-      EXPECTED: ${{ needs.apply.outputs.app_version }}
+    permissions:
+      contents: read
     steps:
-      - name: reachable over HTTPS, running the expected version
-        run: |
-          # New DNS record + ALB: allow a few minutes to become reachable.
-          for _ in $(seq 1 30); do
-            BODY=$(curl -fsS --max-time 5 "$URL/") && break
-            sleep 10
-          done
-          [ -n "${BODY:-}" ] || { echo "::error::$URL never answered"; exit 1; }
-          echo "$BODY"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - run: .github/scripts/smoke.sh "${{ needs.apply.outputs.app_url }}" "${{ needs.apply.outputs.app_version }}"
 
-          # wait_for_steady_state means the rollout finished; if the live version
-          # differs, ECS rolled back (circuit breaker) and the deploy did NOT land.
-          if [ -n "$EXPECTED" ] && ! grep -q "\"version\":\"$EXPECTED\"" <<< "$BODY"; then
-            echo "::error::live version is not $EXPECTED - the deployment was rolled back"
-            exit 1
-          fi
-
-      - name: database reachable (readiness)
-        run: |
-          CODE=$(curl -sS -o body.json -w '%{http_code}' --max-time 10 "$URL/readyz")
-          cat body.json; echo
-          if grep -q 'not configured' body.json; then
-            echo "::notice::database disabled (enable_database = false) - skipping"
-          elif [ "$CODE" != "200" ]; then
-            echo "::error::/readyz returned $CODE"; exit 1
-          fi
-
-      - name: summary
-        run: |
-          {
-            echo "### Smoke test passed"
-            echo "- URL: $URL"
-            echo "- version: \`$EXPECTED\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+  smoke-eks:
+    name: smoke test (EKS)
+    needs: apply-k8s
+    if: needs.apply-k8s.outputs.app_url != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - run: .github/scripts/smoke.sh "${{ needs.apply-k8s.outputs.app_url }}" "${{ needs.apply-k8s.outputs.app_version }}"

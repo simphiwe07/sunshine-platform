@@ -1,0 +1,14 @@
+# Voluntary disruptions (node drains during upgrades, Spot rebalancing) may take
+# down at most ONE pod at a time. maxUnavailable (not minAvailable = replicas)
+# so a drain can always make progress - the classic "stuck upgrade" trap.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sunshine-app
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "app.selector" . | nindent 6 }}

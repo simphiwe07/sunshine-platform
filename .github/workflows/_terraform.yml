@@ -14,6 +14,11 @@ on:
         description: plan | apply | destroy
         required: true
         type: string
+      skip_if_no_cluster:
+        description: EKS cluster name; if set and the cluster doesn't exist, apply/destroy is skipped (Kubernetes stacks)
+        required: false
+        type: string
+        default: ""
     outputs:
       app_url:
         description: Public URL of the app (platform stack only, empty otherwise)
@@ -28,6 +33,7 @@ env:
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
   TF_VERSION: "1.x"
+  TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }} # stacks that read another stack's outputs
 
 jobs:
   plan:
@@ -105,10 +111,27 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
+      # Kubernetes stacks need a live cluster for their providers. No cluster
+      # (lab already down, or enable_eks = false) = nothing to apply/destroy.
+      - name: cluster exists?
+        id: pre
+        if: inputs.skip_if_no_cluster != ''
+        env:
+          CLUSTER: ${{ inputs.skip_if_no_cluster }}
+        run: |
+          if aws eks describe-cluster --name "$CLUSTER" > /dev/null 2>&1; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::EKS cluster $CLUSTER not found - skipping $COMMAND"
+          fi
+
       - name: init
+        if: steps.pre.outputs.skip != 'true'
         run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
 
       - name: plan
+        if: steps.pre.outputs.skip != 'true'
         run: |
           if [ "$COMMAND" = "destroy" ]; then
             terraform plan -destroy -lock-timeout=5m -out=tfplan
@@ -123,11 +146,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: ${{ inputs.command }}
+        if: steps.pre.outputs.skip != 'true'
         run: terraform apply -lock-timeout=5m tfplan
 
       - name: outputs
         id: tfout
-        if: inputs.command == 'apply'
+        if: inputs.command == 'apply' && steps.pre.outputs.skip != 'true'
         run: |
           # -raw fails on null/missing outputs -> empty string (e.g. foundation stack)
           echo "app_url=$(terraform output -raw app_url 2>/dev/null || true)" >> "$GITHUB_OUTPUT"

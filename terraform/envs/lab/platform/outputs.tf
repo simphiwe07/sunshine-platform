@@ -58,3 +58,27 @@ output "app_version" {
   description = "Git SHA of the deployed image (the smoke test checks the live app reports it)."
   value       = try([for t in data.aws_ecr_image.app[0].image_tags : t if length(t) == 40][0], null)
 }
+
+output "vpc_cidr_block" {
+  value = module.network.vpc_cidr_block
+}
+
+output "db_address" {
+  value = module.data.db_address
+}
+
+output "db_name" {
+  value = module.data.db_name
+}
+
+output "eks_cluster_name" {
+  value = try(module.eks[0].cluster_name, null)
+}
+
+output "eks_cluster_version" {
+  value = try(module.eks[0].cluster_version, null)
+}
+
+output "eks_kubeconfig_command" {
+  value = try("aws eks update-kubeconfig --name ${module.eks[0].cluster_name} --region ${var.region} --profile sunshine", null)
+}

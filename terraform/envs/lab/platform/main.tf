@@ -106,5 +106,42 @@ module "app" {
   enable_execute_command = var.enable_ecs_exec
 }
 
-# Roadmap:
-#   phase 5: module "eks" (cluster, spot node group, LB controller, ExternalDNS)
+# ---------- EKS ----------
+# The cluster and everything AWS-side (IAM, node group, add-ons, Pod Identity).
+# Kubernetes-side installs (Helm charts, the app) live in the platform-k8s stack:
+# configuring the Helm/Kubernetes providers from a cluster created in the same
+# apply is a known Terraform pitfall, so the two are applied one after another.
+
+data "aws_iam_role" "eks_admin" {
+  for_each = toset(["${var.project}-gha-apply", var.human_admin_role])
+  name     = each.value
+}
+
+data "aws_iam_role" "eks_admin_view" {
+  name = "${var.project}-gha-plan"
+}
+
+data "aws_iam_role" "eks_view" {
+  name = "${var.project}-human-readonly"
+}
+
+module "eks" {
+  source = "../../../modules/eks"
+  count  = var.enable_eks ? 1 : 0
+
+  name                    = local.name
+  kubernetes_version      = var.eks_version
+  node_kubernetes_version = var.eks_node_version
+
+  private_subnet_ids      = module.network.private_subnet_ids
+  node_security_group_ids = [module.data.app_security_group_id] # the DB trusts this SG
+
+  admin_role_arns      = [for r in data.aws_iam_role.eks_admin : r.arn]
+  admin_view_role_arns = [data.aws_iam_role.eks_admin_view.arn]
+  view_role_arns       = [data.aws_iam_role.eks_view.arn]
+
+  hosted_zone_arn         = data.aws_route53_zone.this.arn
+  enable_external_secrets = var.enable_database
+  db_secret_arn           = module.data.db_master_secret_arn
+  app_bucket_arn          = module.data.app_bucket_arn
+}
