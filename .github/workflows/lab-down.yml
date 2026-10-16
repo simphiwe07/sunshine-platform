@@ -1,5 +1,12 @@
 # End a lab session. Also runs every night at 20:00 SAST (18:00 UTC)
 # so a forgotten lab never burns credits overnight.
+#
+# Order matters with EKS: load balancers created BY Kubernetes (Ingress -> ALB,
+# Service type LoadBalancer -> NLB) are not in Terraform state. If the cluster
+# went first, they would be orphaned and block deleting the VPC. So:
+#   1. delete those Kubernetes objects and wait for the controller to remove the LBs
+#   2. destroy the Kubernetes stack (Helm releases)
+#   3. destroy the platform (EKS, RDS, VPC ...)
 name: lab-down
 
 on:
@@ -9,8 +16,54 @@ on:
 
 permissions: {}
 
+env:
+  CLUSTER: sunshine-lab
+
 jobs:
+  k8s-cleanup:
+    name: delete Kubernetes-managed load balancers
+    runs-on: ubuntu-24.04
+    environment: lab
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          role-session-name: gha-k8s-cleanup-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: delete Ingress / LoadBalancer Services and wait
+        run: |
+          if ! aws eks describe-cluster --name "$CLUSTER" > /dev/null 2>&1; then
+            echo "::notice::no EKS cluster - nothing to clean up"; exit 0
+          fi
+          aws eks update-kubeconfig --name "$CLUSTER"
+          # Finalizers make kubectl wait until the controller has deleted the ALB/NLB.
+          kubectl delete ingress --all --all-namespaces --wait --timeout=10m
+          kubectl get svc -A -o json \
+            | jq -r '.items[] | select(.spec.type=="LoadBalancer") | "\(.metadata.namespace) \(.metadata.name)"' \
+            | while read -r ns name; do kubectl delete svc -n "$ns" "$name" --wait --timeout=10m; done
+          # ExternalDNS (policy=sync, 1m interval) now removes the Route 53 records.
+          sleep 90
+
+  destroy-k8s:
+    needs: k8s-cleanup
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      stack: terraform/envs/lab/platform-k8s
+      command: destroy
+      skip_if_no_cluster: sunshine-lab
+
   destroy:
+    needs: destroy-k8s
+    # Run even if the Kubernetes steps failed: the EKS cluster and nodes are
+    # what cost money, so always try to remove them.
+    if: ${{ !cancelled() }}
     permissions:
       id-token: write
       contents: read

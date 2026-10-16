@@ -1,4 +1,7 @@
-# Start a lab session: creates the hourly-billed platform stack.
+# Start a lab session:
+#   1. platform      - network, database, ECS and/or EKS cluster (Terraform/AWS)
+#   2. platform-k8s  - controllers + app inside EKS (Helm), skipped if no cluster
+#   3. smoke tests   - each app is reachable, ready, and runs the deployed SHA
 name: lab-up
 
 on:
@@ -15,3 +18,36 @@ jobs:
     with:
       stack: terraform/envs/lab/platform
       command: apply
+
+  apply-k8s:
+    needs: apply
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      stack: terraform/envs/lab/platform-k8s
+      command: apply
+      skip_if_no_cluster: sunshine-lab
+
+  smoke-ecs:
+    name: smoke test (ECS)
+    needs: apply
+    if: needs.apply.outputs.app_url != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - run: .github/scripts/smoke.sh "${{ needs.apply.outputs.app_url }}" "${{ needs.apply.outputs.app_version }}"
+
+  smoke-eks:
+    name: smoke test (EKS)
+    needs: apply-k8s
+    if: needs.apply-k8s.outputs.app_url != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - run: .github/scripts/smoke.sh "${{ needs.apply-k8s.outputs.app_url }}" "${{ needs.apply-k8s.outputs.app_version }}"

@@ -1,0 +1,33 @@
+# AWS Load Balancer Controller turns this into an internet-facing ALB:
+# 80 -> 301 HTTPS, 443 with the wildcard cert, targets = pod IPs.
+# ExternalDNS sees the host and creates the Route 53 alias record.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sunshine-app
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.groupName }}
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.ingress.certificateArn }}
+    alb.ingress.kubernetes.io/ssl-policy: {{ .Values.ingress.sslPolicy }}
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/load-balancer-attributes: routing.http.drop_invalid_header_fields.enabled=true
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=30
+spec:
+  ingressClassName: alb
+  rules:
+    - host: {{ required "ingress.host is required" .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sunshine-app
+                port:
+                  name: http

@@ -38,11 +38,35 @@ jobs:
           tflint --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl" --format compact
 
       - name: checkov
-        uses: bridgecrewio/checkov-action@6f26dc90000b74feb589a906cdfae540f5119895 # v12
+        uses: bridgecrewio/checkov-action@6f26dc90000b74feb589a906cdfae540f5119895 # v12.3134.0
         with:
           directory: terraform
           framework: terraform
           config_file: .checkov.yaml
+
+  # The Kubernetes stack can't be planned on a PR (it needs a live cluster),
+  # so at least validate it and lint/render the Helm chart.
+  k8s:
+    name: validate k8s stack / lint chart
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "1.x"
+          terraform_wrapper: false
+
+      - name: terraform validate (platform-k8s)
+        working-directory: terraform/envs/lab/platform-k8s
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+      - name: helm lint + render
+        run: |
+          helm lint --strict deploy/charts/sunshine-app -f deploy/charts/sunshine-app/ci/test-values.yaml
+          helm template sunshine-app deploy/charts/sunshine-app -f deploy/charts/sunshine-app/ci/test-values.yaml > /dev/null
 
   plan:
     name: plan

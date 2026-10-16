@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sunshine-app
+description: Sunshine demo app on EKS - Deployment, HPA, PDB, ALB Ingress, NLB Service, ExternalSecret, NetworkPolicy
+type: application
+version: 0.1.0

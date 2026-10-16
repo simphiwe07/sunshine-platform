@@ -1,0 +1,44 @@
+# Everything environment-specific is passed in by Terraform (platform-k8s).
+
+# Changes when any chart file changes, so a template-only edit still rolls out.
+chartHash: ""
+
+# Image by digest (repo@sha256:...) - exact scanned bytes, never a movable tag.
+image: ""
+region: eu-west-1
+bucket: ""
+vpcCidr: 10.20.0.0/16
+containerPort: 8080
+
+serviceAccount:
+  name: sunshine-app # Pod Identity association matches on this name
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 256Mi # no CPU limit: avoids throttling; requests drive scheduling/HPA
+
+autoscaling:
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 60
+
+ingress:
+  host: ""
+  certificateArn: ""
+  sslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+  groupName: sunshine # several Ingresses can share one ALB
+
+nlb:
+  enabled: true
+  host: ""
+  certificateArn: ""
+
+database:
+  enabled: false
+  host: ""
+  name: app
+  secretArn: ""
+  refreshInterval: 1h # how often ESO re-reads Secrets Manager (picks up rotation)

@@ -1,0 +1,15 @@
+# ClusterIP: the ALB targets pod IPs directly (target-type ip), so no NodePort.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sunshine-app
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "app.selector" . | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
