@@ -56,6 +56,7 @@ resource "helm_release" "lb_controller" {
   namespace  = "kube-system"
   wait       = true
   timeout    = 600
+  atomic     = true # a failed install is rolled back instead of left behind
 
   # Nodes block pod access to instance metadata (hop limit 1), so the controller
   # can't auto-discover region and VPC - pass them explicitly.
@@ -84,6 +85,7 @@ resource "helm_release" "external_dns" {
   create_namespace = true
   wait             = true
   timeout          = 300
+  atomic           = true
 
   values = [yamlencode({
     provider      = { name = "aws" }
@@ -119,6 +121,7 @@ resource "helm_release" "external_secrets" {
   create_namespace = true
   wait             = true
   timeout          = 300
+  atomic           = true
 
   # CRDs (ExternalSecret, SecretStore, ...) are installed by the chart by default.
   values = [yamlencode({
