@@ -64,6 +64,10 @@ resource "helm_release" "lb_controller" {
     region       = var.region
     vpcId        = local.platform.vpc_id
     replicaCount = 2
+    # Off: the mutating webhook intercepts EVERY Service creation in the cluster,
+    # and while its pods aren't ready it rejects them ("no endpoints available").
+    # Not needed - our NLB Service names its owner via loadBalancerClass.
+    enableServiceMutatorWebhook = false
     serviceAccount = {
       create = true
       name   = "aws-load-balancer-controller"
@@ -98,6 +102,10 @@ resource "helm_release" "external_dns" {
       name   = "external-dns"
     }
   })]
+
+  # The LB controller registers admission webhooks; install other charts only
+  # once its pods are ready (wait = true), or their objects can be rejected.
+  depends_on = [helm_release.lb_controller]
 }
 
 resource "helm_release" "external_secrets" {
@@ -119,6 +127,10 @@ resource "helm_release" "external_secrets" {
       name   = "external-secrets"
     }
   })]
+
+  # The LB controller registers admission webhooks; install other charts only
+  # once its pods are ready (wait = true), or their objects can be rejected.
+  depends_on = [helm_release.lb_controller]
 }
 
 # ---------- the app ----------
