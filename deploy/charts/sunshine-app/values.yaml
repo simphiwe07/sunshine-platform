@@ -7,7 +7,9 @@ chartHash: ""
 image: ""
 region: eu-west-1
 bucket: ""
-vpcCidr: 10.20.0.0/16
+# Subnets the load balancers live in - the only sources allowed to reach the
+# app port (NetworkPolicy). Terraform passes the public subnet CIDRs.
+loadBalancerCidrs: []
 containerPort: 8080
 
 serviceAccount:

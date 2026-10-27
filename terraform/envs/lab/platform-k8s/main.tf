@@ -28,6 +28,13 @@ data "aws_eks_cluster" "this" {
   name = local.cluster_name
 }
 
+# Public subnets = where the ALB/NLB network interfaces live. Their CIDRs are
+# the only sources the app's NetworkPolicy lets in.
+data "aws_subnet" "public" {
+  for_each = toset(local.platform.public_subnet_ids)
+  id       = each.value
+}
+
 data "aws_acm_certificate" "wildcard" {
   domain      = var.domain_name
   statuses    = ["ISSUED"]
@@ -164,8 +171,9 @@ resource "helm_release" "app" {
     chartHash = local.chart_hash
     image     = "${data.aws_ecr_repository.app.repository_url}@${data.aws_ecr_image.app.image_digest}"
     region    = var.region
-    vpcCidr   = local.platform.vpc_cidr_block
     bucket    = local.platform.app_bucket_name
+
+    loadBalancerCidrs = sort([for s in data.aws_subnet.public : s.cidr_block])
 
     ingress = {
       host           = local.app_host
