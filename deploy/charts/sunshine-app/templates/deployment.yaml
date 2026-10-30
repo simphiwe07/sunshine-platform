@@ -25,7 +25,7 @@ spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
       automountServiceAccountToken: false
       # Longer than preStop + app shutdown, so in-flight requests finish.
-      terminationGracePeriodSeconds: 40
+      terminationGracePeriodSeconds: 45
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -90,11 +90,13 @@ spec:
             periodSeconds: 10
             failureThreshold: 3
           lifecycle:
-            # Keep serving while the ALB/NLB deregisters this pod; without it,
-            # scale-downs and Spot interruptions show up as 502s.
+            # Keep serving while the LB controller deregisters this pod from the
+            # ALB/NLB; without it, drains and scale-downs show up as 502/504s.
+            # 20s covers controller reconcile + ALB propagation (10s was not
+            # enough in the upgrade drill).
             preStop:
               exec:
-                command: ["sleep", "10"]
+                command: ["sleep", "20"]
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
