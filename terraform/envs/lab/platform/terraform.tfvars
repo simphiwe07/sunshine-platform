@@ -8,4 +8,4 @@ enable_database    = true
 enable_app = false
 enable_eks = true
 # EKS upgrade drill: control plane and nodes on 1.37
-eks_version      = "1.37"
+eks_version = "1.37"
