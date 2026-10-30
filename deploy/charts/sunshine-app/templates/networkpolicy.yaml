@@ -10,12 +10,15 @@ spec:
   podSelector: {}
   policyTypes: ["Ingress"]
 ---
-# 2) the app port only, only from inside the VPC: ALB/NLB nodes (pod-IP targets)
-#    and kubelet health probes. Nothing else can connect to the app pods.
+# 2) the app port only, only from the load balancer subnets (public subnets,
+#    where the ALB/NLB network interfaces live; targets are pod IPs).
+#    NOT the whole VPC CIDR: pod IPs come from the VPC too, so that would let
+#    any pod in any namespace in. Kubelet health probes are still allowed by
+#    the VPC CNI policy agent (tested: pods stay Ready).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: sunshine-app-from-vpc
+  name: sunshine-app-from-load-balancers
   labels:
     {{- include "app.labels" . | nindent 4 }}
 spec:
@@ -25,8 +28,12 @@ spec:
   policyTypes: ["Ingress"]
   ingress:
     - from:
+        {{- /* an empty "from" would mean "allow everyone" - refuse to render that */}}
+        {{- if not .Values.loadBalancerCidrs }}{{ fail "loadBalancerCidrs must list at least one CIDR" }}{{ end }}
+        {{- range .Values.loadBalancerCidrs }}
         - ipBlock:
-            cidr: {{ .Values.vpcCidr }}
+            cidr: {{ . }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: {{ .Values.containerPort }}

@@ -1,6 +1,7 @@
 # Dummy values for CI lint/render only (real values come from platform-k8s).
 image: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/sunshine-app@sha256:0000000000000000000000000000000000000000000000000000000000000000
 bucket: example-bucket
+loadBalancerCidrs: [10.20.0.0/24, 10.20.1.0/24]
 ingress:
   host: eks.example.com
   certificateArn: arn:aws:acm:eu-west-1:000000000000:certificate/example
