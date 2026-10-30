@@ -155,6 +155,11 @@ resource "kubernetes_namespace_v1" "app" {
       "pod-security.kubernetes.io/enforce" = "restricted"
       "pod-security.kubernetes.io/audit"   = "restricted"
       "pod-security.kubernetes.io/warn"    = "restricted"
+      # LB controller injects a readiness gate: a pod only counts as Ready once
+      # the ALB reports its target healthy. Rollouts and node drains (PDB) then
+      # wait for the load balancer, not just the kubelet - found in the 1.37
+      # upgrade drill (20 x 502/504 while nodes were drained without it).
+      "elbv2.k8s.aws/pod-readiness-gate-inject" = "enabled"
     }
   }
 }
