@@ -82,3 +82,8 @@ output "eks_cluster_version" {
 output "eks_kubeconfig_command" {
   value = try("aws eks update-kubeconfig --name ${module.eks[0].cluster_name} --region ${var.region} --profile sunshine", null)
 }
+
+output "eks_persona_role_arns" {
+  description = "IAM roles for the viewer/developer personas (see docs/runbooks/identity.md)."
+  value       = try(module.eks[0].persona_role_arns, {})
+}

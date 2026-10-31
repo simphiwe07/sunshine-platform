@@ -25,3 +25,7 @@ output "node_role_arn" {
 output "pod_identity_role_arns" {
   value = { for k, r in aws_iam_role.pod : k => r.arn }
 }
+
+output "persona_role_arns" {
+  value = { for k, r in aws_iam_role.persona : k => r.arn }
+}

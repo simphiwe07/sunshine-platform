@@ -57,3 +57,9 @@ variable "external_secrets_chart_version" {
   type    = string
   default = "2.12.0"
 }
+
+variable "enable_auth" {
+  description = "Require Cognito sign-in at the ALB (pool from the foundation stack). /healthz and /readyz stay public."
+  type        = bool
+  default     = true
+}

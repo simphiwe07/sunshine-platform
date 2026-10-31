@@ -1,6 +1,45 @@
-# AWS Load Balancer Controller turns this into an internet-facing ALB:
-# 80 -> 301 HTTPS, 443 with the wildcard cert, targets = pod IPs.
+# AWS Load Balancer Controller turns these into ONE internet-facing ALB
+# (IngressGroup): 80 -> 301 HTTPS, 443 with the wildcard cert, targets = pod IPs.
 # ExternalDNS sees the host and creates the Route 53 alias record.
+#
+# Listener rules, in order (group.order, lowest first):
+#   10  public:  health endpoints (smoke tests, uptime checks) - no sign-in
+#               /metrics -> 404 at the ALB (Prometheus scrapes pods directly)
+#   20  app:     everything else - Cognito sign-in first when auth is enabled
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sunshine-app-public
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+  annotations:
+    {{- include "app.albAnnotations" . | nindent 4 }}
+    alb.ingress.kubernetes.io/group.order: "10"
+    alb.ingress.kubernetes.io/actions.deny-metrics: >-
+      {"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"not found"}}
+spec:
+  ingressClassName: alb
+  rules:
+    - host: {{ required "ingress.host is required" .Values.ingress.host }}
+      http:
+        paths:
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: deny-metrics
+                port:
+                  name: use-annotation
+          {{- range .Values.auth.publicPaths }}
+          - path: {{ . }}
+            pathType: Exact
+            backend:
+              service:
+                name: sunshine-app
+                port:
+                  name: http
+          {{- end }}
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -8,16 +47,18 @@ metadata:
   labels:
     {{- include "app.labels" . | nindent 4 }}
   annotations:
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.groupName }}
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
-    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.ingress.certificateArn }}
-    alb.ingress.kubernetes.io/ssl-policy: {{ .Values.ingress.sslPolicy }}
-    alb.ingress.kubernetes.io/healthcheck-path: /healthz
-    alb.ingress.kubernetes.io/load-balancer-attributes: routing.http.drop_invalid_header_fields.enabled=true
-    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=30
+    {{- include "app.albAnnotations" . | nindent 4 }}
+    alb.ingress.kubernetes.io/group.order: "20"
+    {{- if .Values.auth.enabled }}
+    # Unauthenticated browser -> 302 to the Cognito hosted UI. The ALB keeps the
+    # session in an encrypted cookie and adds x-amzn-oidc-* headers per request.
+    alb.ingress.kubernetes.io/auth-type: cognito
+    alb.ingress.kubernetes.io/auth-idp-cognito: {{ dict "userPoolARN" (required "auth.userPoolArn is required" .Values.auth.userPoolArn) "userPoolClientID" (required "auth.userPoolClientId is required" .Values.auth.userPoolClientId) "userPoolDomain" (required "auth.userPoolDomain is required" .Values.auth.userPoolDomain) | toJson | squote }}
+    alb.ingress.kubernetes.io/auth-on-unauthenticated-request: authenticate
+    alb.ingress.kubernetes.io/auth-scope: {{ .Values.auth.scope | quote }}
+    alb.ingress.kubernetes.io/auth-session-cookie: AWSELBAuthSessionCookie
+    alb.ingress.kubernetes.io/auth-session-timeout: {{ .Values.auth.sessionTimeoutSeconds | quote }}
+    {{- end }}
 spec:
   ingressClassName: alb
   rules:

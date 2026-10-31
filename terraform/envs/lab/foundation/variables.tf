@@ -34,3 +34,21 @@ variable "validate_certificate" {
   type        = bool
   default     = false
 }
+
+variable "enable_cognito" {
+  description = "Cognito user pool for app sign-in (ALB authentication)."
+  type        = bool
+  default     = true
+}
+
+variable "auth_domain_prefix" {
+  description = "Hosted UI prefix: <prefix>.auth.<region>.amazoncognito.com. Globally unique per region; may not contain aws, amazon or cognito."
+  type        = string
+  default     = "simptechit-lab"
+}
+
+variable "auth_app_hostnames" {
+  description = "Subdomains whose ALB may use the pool (callback https://<host>.<domain>/oauth2/idpresponse)."
+  type        = list(string)
+  default     = ["eks"]
+}

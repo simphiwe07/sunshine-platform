@@ -8,19 +8,25 @@ Endpoints
   /db        Postgres version, server time and whether this connection uses TLS
   /visits    increments a counter row in Postgres
   /s3        writes an object to the app bucket with the task role, returns the count
+  /me        who is signed in (ALB + Cognito), after verifying the ALB's signature
+  /admin     only for the Cognito group "admin" - app-level authorisation
+  /logout    ends the ALB session and the Cognito session
 
 Config comes from environment variables. DB_USER / DB_PASSWORD are injected by
 ECS from Secrets Manager at task start - they are never in the image or in Git.
 """
 
+import functools
 import json
 import os
 import socket
 import time
 import urllib.request
 
+import jwt
 import psycopg
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi.responses import RedirectResponse
 
 VERSION = os.getenv("APP_VERSION", "dev")
 
@@ -78,7 +84,9 @@ def root() -> dict:
 
 @app.get("/healthz")
 def healthz() -> dict:
-    return {"status": "ok"}
+    # version here too: "/" sits behind sign-in, /healthz is public, so the
+    # post-deploy smoke test reads the deployed version from here.
+    return {"status": "ok", "version": VERSION}
 
 
 @app.get("/readyz")
@@ -140,3 +148,115 @@ def s3(response: Response) -> dict:
     client.put_object(Bucket=bucket, Key=key, Body=f"hello from {VERSION}\n".encode())
     listed = client.list_objects_v2(Bucket=bucket, Prefix="visits/")
     return {"bucket": bucket, "wrote": key, "objects": listed.get("KeyCount", 0)}
+
+
+# ---------- identity (ALB authenticates, the app verifies and authorises) ----------
+# The ALB forwards two headers after a Cognito sign-in:
+#   x-amzn-oidc-data         user claims (sub, email), signed by the ALB (ES256)
+#   x-amzn-oidc-accesstoken  Cognito access token, signed by Cognito (RS256),
+#                            carries "cognito:groups"
+# Headers are just text: verify both signatures, never trust them blindly. The
+# NetworkPolicy (only load balancer subnets reach the pod) is the outer layer.
+
+
+@functools.lru_cache(maxsize=16)
+def _alb_public_key(region: str, kid: str) -> str:
+    """ALB signing keys are published per key id (PEM), not as a JWKS."""
+    url = f"https://public-keys.auth.elb.{region}.amazonaws.com/{kid}"
+    with urllib.request.urlopen(url, timeout=3) as resp:
+        return resp.read().decode()
+
+
+@functools.lru_cache(maxsize=4)
+def _cognito_jwks(issuer: str) -> jwt.PyJWKClient:
+    return jwt.PyJWKClient(f"{issuer}/.well-known/jwks.json", cache_keys=True)
+
+
+def _cognito_signing_key(issuer: str, token: str):
+    return _cognito_jwks(issuer).get_signing_key_from_jwt(token).key
+
+
+def _unauthorised(reason: str) -> HTTPException:
+    return HTTPException(status_code=401, detail=f"not authenticated: {reason}")
+
+
+def _identity(oidc_data: str | None, access_token: str | None) -> dict:
+    signer_prefix = os.getenv("OIDC_SIGNER_PREFIX")
+    issuer = os.getenv("OIDC_ISSUER")
+    client_id = os.getenv("OIDC_CLIENT_ID")
+    if not (signer_prefix and issuer and client_id):
+        raise _unauthorised("sign-in is not enabled for this deployment")
+    if not (oidc_data and access_token):
+        raise _unauthorised("no identity headers")
+
+    # 1) user claims, signed by OUR ALB. ALB tokens keep base64 "=" padding,
+    #    which JWT forbids - PyJWT then reports a bad SIGNATURE. Strip it first.
+    oidc_data = ".".join(part.rstrip("=") for part in oidc_data.split("."))
+    try:
+        header = jwt.get_unverified_header(oidc_data)
+        if not header.get("kid"):
+            raise _unauthorised("ALB token has no key id")
+        if not str(header.get("signer", "")).startswith(signer_prefix):
+            raise _unauthorised("signed by an unknown load balancer")
+        if header.get("client") != client_id:
+            raise _unauthorised("issued for another client")
+        region = header["signer"].split(":")[3]
+        claims = jwt.decode(
+            oidc_data, _alb_public_key(region, header["kid"]), algorithms=["ES256"]
+        )
+    except jwt.PyJWTError as exc:
+        raise _unauthorised(f"bad ALB token ({type(exc).__name__})") from exc
+
+    # 2) groups, from the access token signed by OUR Cognito pool for OUR client
+    try:
+        access = jwt.decode(
+            access_token,
+            _cognito_signing_key(issuer, access_token),
+            algorithms=["RS256"],
+            issuer=issuer,
+            options={"require": ["exp", "iss", "sub"]},
+        )
+    except jwt.PyJWTError as exc:
+        raise _unauthorised(f"bad access token ({type(exc).__name__})") from exc
+    if access.get("token_use") != "access" or access.get("client_id") != client_id:
+        raise _unauthorised("access token is not for this app")
+    if access["sub"] != claims.get("sub"):
+        raise _unauthorised("tokens belong to different users")
+
+    return {
+        "sub": claims["sub"],
+        "email": claims.get("email"),
+        "groups": sorted(access.get("cognito:groups", [])),
+    }
+
+
+@app.get("/me")
+def me(
+    x_amzn_oidc_data: str | None = Header(default=None),
+    x_amzn_oidc_accesstoken: str | None = Header(default=None),
+) -> dict:
+    return _identity(x_amzn_oidc_data, x_amzn_oidc_accesstoken)
+
+
+@app.get("/admin")
+def admin(
+    x_amzn_oidc_data: str | None = Header(default=None),
+    x_amzn_oidc_accesstoken: str | None = Header(default=None),
+) -> dict:
+    user = _identity(x_amzn_oidc_data, x_amzn_oidc_accesstoken)
+    if "admin" not in user["groups"]:
+        # 403, not 401: we know who you are, you just may not do this.
+        raise HTTPException(status_code=403, detail="admin group required")
+    return {"admin": True, "user": user["email"], **TASK}
+
+
+@app.get("/logout")
+def logout() -> Response:
+    """The ALB has no logout: expire its session cookie (split into up to 4
+    shards), then let Cognito end its own session and send the browser back."""
+    target = os.getenv("OIDC_LOGOUT_URL") or "/"
+    response = RedirectResponse(target, status_code=302)
+    for shard in range(4):
+        response.delete_cookie(f"AWSELBAuthSessionCookie-{shard}", path="/", secure=True)
+    return response
+

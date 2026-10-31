@@ -89,6 +89,26 @@ variable "view_role_arns" {
   default     = []
 }
 
+variable "personas" {
+  description = "Persona => Kubernetes groups. Creates IAM role <name>-eks-<persona> mapped to those groups; RBAC for the groups lives in platform-k8s."
+  type        = map(list(string))
+  default = {
+    viewer    = ["sunshine:viewers"]
+    developer = ["sunshine:viewers", "sunshine:developers"]
+  }
+
+  validation {
+    condition     = alltrue([for g in flatten(values(var.personas)) : !can(regex("^(system|eks|aws|amazon|iam):", g))])
+    error_message = "Group names may not use the reserved prefixes system:, eks:, aws:, amazon: or iam:."
+  }
+}
+
+variable "persona_trusted_role_arns" {
+  description = "Roles allowed to assume the persona roles. Empty = no persona roles."
+  type        = list(string)
+  default     = []
+}
+
 # ---------- workload identities ----------
 
 variable "hosted_zone_arn" {
