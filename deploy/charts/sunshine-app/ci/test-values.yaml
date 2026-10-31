@@ -13,3 +13,11 @@ database:
   enabled: true
   host: db.example.com
   secretArn: arn:aws:secretsmanager:eu-west-1:000000000000:secret:example-AbCdEf
+auth:
+  enabled: true
+  userPoolArn: arn:aws:cognito-idp:eu-west-1:000000000000:userpool/eu-west-1_Example
+  userPoolClientId: exampleclientid
+  userPoolDomain: example-auth
+  issuer: https://cognito-idp.eu-west-1.amazonaws.com/eu-west-1_Example
+  signerPrefix: "arn:aws:elasticloadbalancing:eu-west-1:000000000000:loadbalancer/app/k8s-sunshine-"
+  logoutUrl: https://example-auth.auth.eu-west-1.amazoncognito.com/logout?client_id=exampleclientid&logout_uri=https%3A%2F%2Feks.example.com%2F

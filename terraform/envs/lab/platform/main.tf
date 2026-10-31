@@ -140,6 +140,10 @@ module "eks" {
   admin_view_role_arns = [data.aws_iam_role.eks_admin_view.arn]
   view_role_arns       = [data.aws_iam_role.eks_view.arn]
 
+  # Personas (viewer, developer) -> Kubernetes groups -> RBAC in platform-k8s.
+  # The admin session may assume them, e.g. to prove least privilege.
+  persona_trusted_role_arns = [data.aws_iam_role.eks_admin[var.human_admin_role].arn]
+
   hosted_zone_arn         = data.aws_route53_zone.this.arn
   enable_external_secrets = var.enable_database
   db_secret_arn           = module.data.db_master_secret_arn

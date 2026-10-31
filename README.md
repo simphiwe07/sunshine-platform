@@ -28,6 +28,8 @@ terraform/
 |---|---|---|
 | You (console/CLI) | IAM Identity Center / SSO, MFA | Everything, incl. bootstrap |
 | CI plan (PRs, main) | OIDC → `sunshine-gha-plan` | Read-only + state lock files |
+| App users (browser) | Cognito hosted UI + TOTP at the ALB | viewer / developer / admin (Cognito groups) |
+| kubectl personas | `sunshine-lab-eks-viewer` / `-developer` (assumed from the admin session) | Kubernetes RBAC: read / + restart the app |
 | CI apply (env `lab`) | OIDC → `sunshine-gha-apply` | Admin, **minus** explicit denies: can't touch state/trail buckets, CloudTrail, its own roles, the OIDC provider, budgets, or create IAM users/access keys |
 
 No long-lived AWS keys exist anywhere, including GitHub secrets.
@@ -98,6 +100,7 @@ Debugging a task: set `enable_ecs_exec = true` (this also makes the root filesys
 - `platform` creates the cluster and everything AWS-side; `platform-k8s` installs the controllers (Helm) and the app chart (`deploy/charts/sunshine-app`).
 - App: `https://eks.<domain>` (ALB via Ingress) and `https://nlb.<domain>` (NLB via Service type LoadBalancer).
 - kubectl: `aws eks update-kubeconfig --name sunshine-lab --region eu-west-1 --profile sunshine`
+- Sign-in: the app requires a Cognito login (except `/healthz`, `/readyz`); least-privilege kubectl personas. See [docs/runbooks/identity.md](docs/runbooks/identity.md).
 - **lab-down** deletes the Kubernetes-made load balancers first, then the k8s stack, then the platform.
 - Upgrades: [docs/runbooks/eks-upgrade.md](docs/runbooks/eks-upgrade.md).
 
@@ -116,5 +119,5 @@ Debugging a task: set `enable_ecs_exec = true` (this also makes the root filesys
 - [x] 4. ECS Fargate service behind ALB, HTTPS with the wildcard cert (on-demand base + Spot, autoscaling, ECS Exec)
 - [x] 4b. Own container image: ECR, test/scan/push pipeline, image pinned by digest, DB secret injected, smoke test
 - [x] 5. EKS: Spot node group, access entries, Pod Identity, AWS LB Controller (ALB + NLB), ExternalDNS, External Secrets, HPA/PDB/NetworkPolicy - [upgrade runbook](docs/runbooks/eks-upgrade.md)
-- [ ] 6. Identity: Cognito/Keycloak OIDC login, K8s RBAC mapped to IAM roles
+- [x] 6. Identity: Cognito sign-in at the ALB (TOTP MFA, verified in the app), viewer/developer/admin personas: IAM role → EKS access entry → Kubernetes RBAC - [runbook](docs/runbooks/identity.md)
 - [ ] 7. Hardening: WAF, image signing/scanning gates, runbooks

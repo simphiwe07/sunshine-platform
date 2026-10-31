@@ -1,4 +1,5 @@
-# Persistent, near-free layer: hosted zone ($0.50/month) + ACM cert (free).
+# Persistent, near-free layer: hosted zone ($0.50/month), ACM cert, ECR repo,
+# Cognito user pool (free tier).
 # Applied on merge to main; never torn down nightly.
 
 terraform {

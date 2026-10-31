@@ -15,3 +15,11 @@ output "app_version" {
 output "cluster_name" {
   value = local.cluster_name
 }
+
+output "auth" {
+  description = "Sign-in details (users: docs/runbooks/identity.md)."
+  value = var.enable_auth ? {
+    hosted_ui    = "https://${local.cognito_domain}"
+    user_pool_id = local.user_pool_id
+  } : null
+}

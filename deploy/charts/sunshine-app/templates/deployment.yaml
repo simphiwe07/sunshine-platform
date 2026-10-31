@@ -58,6 +58,17 @@ spec:
               value: {{ .Values.region | quote }}
             - name: APP_BUCKET
               value: {{ .Values.bucket | quote }}
+            {{- if .Values.auth.enabled }}
+            # Used to VERIFY the identity headers the ALB forwards (see /me).
+            - name: OIDC_SIGNER_PREFIX
+              value: {{ required "auth.signerPrefix is required" .Values.auth.signerPrefix | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.auth.userPoolClientId | quote }}
+            - name: OIDC_ISSUER
+              value: {{ required "auth.issuer is required" .Values.auth.issuer | quote }}
+            - name: OIDC_LOGOUT_URL
+              value: {{ .Values.auth.logoutUrl | quote }}
+            {{- end }}
             {{- if .Values.database.enabled }}
             - name: DB_HOST
               value: {{ .Values.database.host | quote }}

@@ -27,6 +27,24 @@ autoscaling:
   maxReplicas: 6
   targetCPUUtilizationPercentage: 60
 
+auth:
+  # ALB authenticates every request against Cognito, except publicPaths.
+  # Values come from the foundation stack's user pool (via platform-k8s).
+  enabled: false
+  userPoolArn: ""
+  userPoolClientId: ""
+  userPoolDomain: "" # prefix only, e.g. simptechit-lab
+  issuer: ""         # https://cognito-idp.<region>.amazonaws.com/<pool id>
+  signerPrefix: ""   # ARN prefix of the ALB allowed to sign x-amzn-oidc-data
+  logoutUrl: ""
+  scope: openid email
+  sessionTimeoutSeconds: 28800 # 8h ALB session, then sign in again
+  # Reachable without sign-in. Nothing that burns CPU or shows data: /burn is
+  # an amplification endpoint and stays behind sign-in.
+  publicPaths:
+    - /healthz
+    - /readyz
+
 ingress:
   host: ""
   certificateArn: ""

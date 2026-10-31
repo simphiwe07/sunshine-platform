@@ -191,6 +191,8 @@ resource "helm_release" "app" {
       certificateArn = data.aws_acm_certificate.wildcard.arn
     }
 
+    auth = local.auth_values
+
     database = {
       enabled   = local.db_enabled
       host      = try(local.platform.db_address, "")
