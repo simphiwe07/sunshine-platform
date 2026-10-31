@@ -129,13 +129,14 @@ fields @timestamp, user.username, verb, objectRef.resource, objectRef.name, resp
 | Cognito page says `redirect_mismatch` | Callback URL not in the client (`auth_app_hostnames` in foundation). |
 | ALB returns **500** right after sign-in | ALB can't reach Cognito's token endpoint, or the client has no secret. |
 | `/me` 401 "signed by an unknown load balancer" | ALB name doesn't start with `k8s-sunshine-` (IngressGroup renamed) - fix `signerPrefix` in platform-k8s `auth.tf`. |
-| `/me` 401 "bad ALB token (InvalidSignatureError)" | Base64 padding not stripped, or the key came from another region. |
+| `/me` 401 "bad ALB token (InvalidSignatureError)" | Token altered before verifying (e.g. its base64 padding stripped - the signature covers the padded text), or the key came from another region. |
+| ALB **401 Authorization Required** on `/oauth2/idpresponse` | Sign-in took too long (first login: password + MFA set-up) or the page was refreshed (the code is single-use). Open the app URL again. |
 | `aws eks update-kubeconfig --profile sunshine-developer` AccessDenied on AssumeRole | Your SSO session is not `AccountFullAccessRole`, or the platform stack hasn't been applied. |
 
 ## Interview notes
 
 - **Why at the ALB?** No auth code in every service; unauthenticated traffic never reaches a pod; the client secret stays in AWS (the ALB fetches it from Cognito).
 - **Why verify again in the app?** Headers are just text. Defence in depth: NetworkPolicy (only the ALB subnets reach the pod) + ALB signature (`signer` = our ALB, `client` = our app client) + Cognito signature on the access token, same `sub` in both.
-- **Gotchas found:** ALB tokens keep base64 padding, so PyJWT reports a bad signature until you strip it. ALB has no logout, so expire the `AWSELBAuthSessionCookie-*` shards and redirect to Cognito `/logout`.
+- **Gotchas found:** ALB tokens keep base64 padding and the signature covers the padded text, so verify the header exactly as received. I first stripped the padding and my unit test (which signed before padding) still passed; the first real sign-in failed with InvalidSignatureError, and the test now builds tokens exactly like the ALB. ALB has no logout, so expire the `AWSELBAuthSessionCookie-*` shards and redirect to Cognito `/logout`.
 - **Access policies vs RBAC:** EKS access policies are AWS-managed and coarse (admin, admin-view, view). Kubernetes groups + RBAC give exact rules, e.g. "restart the app, but no Secrets and no exec". Exec and port-forward are excluded on purpose because they bypass the ALB sign-in and NetworkPolicy.
 - **Production next step:** an Identity Center permission set per persona instead of role chaining, or EKS OIDC identity provider config (Cognito/Keycloak groups → Kubernetes groups) with kubelogin.

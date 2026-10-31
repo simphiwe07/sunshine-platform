@@ -190,8 +190,9 @@ def _identity(oidc_data: str | None, access_token: str | None) -> dict:
         raise _unauthorised("no identity headers")
 
     # 1) user claims, signed by OUR ALB. ALB tokens keep base64 "=" padding,
-    #    which JWT forbids - PyJWT then reports a bad SIGNATURE. Strip it first.
-    oidc_data = ".".join(part.rstrip("=") for part in oidc_data.split("."))
+    #    and the signature covers the PADDED text - verify the token exactly as
+    #    received. (Stripping the padding first breaks the signature: found the
+    #    hard way, the first real sign-in returned InvalidSignatureError.)
     try:
         header = jwt.get_unverified_header(oidc_data)
         if not header.get("kid"):

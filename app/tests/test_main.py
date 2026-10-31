@@ -45,12 +45,15 @@ def test_s3_is_503_without_bucket(monkeypatch):
 
 # ---------- identity: forge ALB + Cognito tokens with throw-away keys ----------
 
+import base64  # noqa: E402
+import json  # noqa: E402
 import time as _time  # noqa: E402
 
 import jwt  # noqa: E402
 import pytest  # noqa: E402
-from cryptography.hazmat.primitives import serialization  # noqa: E402
+from cryptography.hazmat.primitives import hashes, serialization  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import ec, rsa  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature  # noqa: E402
 
 SIGNER_PREFIX = "arn:aws:elasticloadbalancing:eu-west-1:111111111111:loadbalancer/app/k8s-sunshine-"
 OUR_ALB = SIGNER_PREFIX + "abc123/50dc6c495c0c9188"
@@ -67,20 +70,27 @@ def _pem(private_key) -> str:
     ).decode()
 
 
-def _alb_style(token: str) -> str:
-    """Re-add base64 padding, like the real ALB does."""
-    def pad(part):
-        return part + "=" * (-len(part) % 4)
-    return ".".join(pad(p) for p in token.split("."))
+def _b64(raw: bytes) -> str:
+    """base64url WITH "=" padding - how the ALB encodes its token segments."""
+    return base64.urlsafe_b64encode(raw).decode()
+
+
+def _alb_token(claims: dict, header: dict, key) -> str:
+    """Build a token the way the ALB does: padded segments, and the ES256
+    signature computed over the PADDED header.payload."""
+    signing_input = _b64(json.dumps({"alg": "ES256", "typ": "JWT", **header}).encode()) + "." + _b64(
+        json.dumps(claims).encode()
+    )
+    r, s_ = decode_dss_signature(key.sign(signing_input.encode(), ec.ECDSA(hashes.SHA256())))
+    return signing_input + "." + _b64(r.to_bytes(32, "big") + s_.to_bytes(32, "big"))
 
 
 def _headers(groups=(), signer=OUR_ALB, client=CLIENT, alb_key=ALB_KEY, sub="user-1"):
     now = int(_time.time())
-    data = jwt.encode(
+    data = _alb_token(
         {"sub": sub, "email": "dev@example.com", "exp": now + 60, "iss": ISSUER},
+        {"kid": "alb-key-1", "signer": signer, "client": client},
         alb_key,
-        algorithm="ES256",
-        headers={"kid": "alb-key-1", "signer": signer, "client": client},
     )
     access = jwt.encode(
         {"sub": "user-1", "iss": ISSUER, "exp": now + 60, "token_use": "access",
@@ -88,7 +98,7 @@ def _headers(groups=(), signer=OUR_ALB, client=CLIENT, alb_key=ALB_KEY, sub="use
         COGNITO_KEY,
         algorithm="RS256",
     )
-    return {"x-amzn-oidc-data": _alb_style(data), "x-amzn-oidc-accesstoken": access}
+    return {"x-amzn-oidc-data": data, "x-amzn-oidc-accesstoken": access}
 
 
 @pytest.fixture
@@ -119,6 +129,20 @@ def test_me_rejects_another_load_balancer(auth_env):
 def test_me_rejects_a_forged_signature(auth_env):
     forged = _headers(alb_key=ec.generate_private_key(ec.SECP256R1()))
     assert client.get("/me", headers=forged).status_code == 401
+
+
+def test_alb_token_really_is_padded():
+    token = _headers()["x-amzn-oidc-data"]
+    assert any(part.endswith("=") for part in token.split("."))  # else the test proves nothing
+
+
+def test_me_rejects_a_tampered_token(auth_env):
+    headers = _headers(groups=["admin"])
+    h, p, sig = headers["x-amzn-oidc-data"].split(".")
+    claims = json.loads(base64.urlsafe_b64decode(p))
+    claims["email"] = "attacker@example.com"
+    headers["x-amzn-oidc-data"] = ".".join([h, _b64(json.dumps(claims).encode()), sig])
+    assert client.get("/me", headers=headers).status_code == 401
 
 
 def test_me_rejects_mismatched_users(auth_env):
