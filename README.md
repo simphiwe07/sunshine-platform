@@ -119,5 +119,6 @@ Debugging a task: set `enable_ecs_exec = true` (this also makes the root filesys
 - [x] 4. ECS Fargate service behind ALB, HTTPS with the wildcard cert (on-demand base + Spot, autoscaling, ECS Exec)
 - [x] 4b. Own container image: ECR, test/scan/push pipeline, image pinned by digest, DB secret injected, smoke test
 - [x] 5. EKS: Spot node group, access entries, Pod Identity, AWS LB Controller (ALB + NLB), ExternalDNS, External Secrets, HPA/PDB/NetworkPolicy - [upgrade runbook](docs/runbooks/eks-upgrade.md)
+- [x] 5b. Observability + autoscaling: kube-prometheus-stack (Grafana dashboards as code), app RED metrics, Cluster Autoscaler, k6 demand drill - [runbook](docs/runbooks/scaling-drill.md)
 - [x] 6. Identity: Cognito sign-in at the ALB (TOTP MFA, verified in the app), viewer/developer/admin personas: IAM role → EKS access entry → Kubernetes RBAC - [runbook](docs/runbooks/identity.md)
 - [ ] 7. Hardening: **WAF** on the ALB (managed rules, rate limit, geo allowlist, logs) - [runbook](docs/runbooks/waf.md); image signing/verification; alerting + runbooks (after observability)

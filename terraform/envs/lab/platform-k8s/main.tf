@@ -143,6 +143,127 @@ resource "helm_release" "external_secrets" {
   depends_on = [helm_release.lb_controller]
 }
 
+# ---------- node autoscaling ----------
+# Pending pods (no node has room) -> Cluster Autoscaler raises the managed node
+# group's desired size (Terraform ignores desired_size, so they don't fight);
+# underused nodes are drained (PDBs respected) and removed after a few minutes.
+
+resource "helm_release" "cluster_autoscaler" {
+  name       = "cluster-autoscaler"
+  repository = "https://kubernetes.github.io/autoscaler"
+  chart      = "cluster-autoscaler"
+  version    = var.cluster_autoscaler_chart_version
+  namespace  = "kube-system"
+  wait       = true
+  timeout    = 300
+  atomic     = true
+
+  values = [yamlencode({
+    cloudProvider = "aws"
+    awsRegion     = var.region # no instance metadata from pods (hop limit 1)
+    autoDiscovery = { clusterName = local.cluster_name }
+    image         = { tag = var.cluster_autoscaler_image_tag }
+    rbac = {
+      serviceAccount = { create = true, name = "cluster-autoscaler" } # Pod Identity match
+    }
+    extraArgs = {
+      expander                      = "least-waste"
+      "balance-similar-node-groups" = true
+      "skip-nodes-with-system-pods" = false
+      # Lab timings (defaults are 10m): see scale-down within one session.
+      "scale-down-unneeded-time"   = "3m"
+      "scale-down-delay-after-add" = "3m"
+    }
+  })]
+
+  depends_on = [helm_release.lb_controller]
+}
+
+# ---------- monitoring ----------
+
+resource "kubernetes_namespace_v1" "monitoring" {
+  count = var.enable_monitoring ? 1 : 0
+
+  # No Pod Security "restricted" here: node-exporter needs host network/PID
+  # access to read node metrics - an explicit, documented exception.
+  metadata {
+    name = "monitoring"
+  }
+}
+
+# Never the chart's well-known default password. Stored in the encrypted state
+# bucket and in a Kubernetes Secret; read it with kubectl (see runbook).
+resource "random_password" "grafana_admin" {
+  count = var.enable_monitoring ? 1 : 0
+
+  length  = 24
+  special = false
+}
+
+resource "kubernetes_secret_v1" "grafana_admin" {
+  count = var.enable_monitoring ? 1 : 0
+
+  metadata {
+    name      = "grafana-admin"
+    namespace = kubernetes_namespace_v1.monitoring[0].metadata[0].name
+  }
+
+  data = {
+    admin-user     = "admin"
+    admin-password = random_password.grafana_admin[0].result
+  }
+}
+
+resource "helm_release" "kube_prometheus_stack" {
+  count = var.enable_monitoring ? 1 : 0
+
+  name       = "kube-prometheus-stack"
+  repository = "https://prometheus-community.github.io/helm-charts"
+  chart      = "kube-prometheus-stack"
+  version    = var.kube_prometheus_stack_chart_version
+  namespace  = kubernetes_namespace_v1.monitoring[0].metadata[0].name
+  wait       = true
+  timeout    = 900
+  atomic     = true
+
+  values = [yamlencode({
+    # EKS runs these control-plane components for us and doesn't expose their
+    # metrics endpoints - scraping them would only produce "target down".
+    kubeControllerManager = { enabled = false }
+    kubeScheduler         = { enabled = false }
+    kubeEtcd              = { enabled = false }
+    kubeProxy             = { enabled = false }
+
+    alertmanager = { enabled = false } # alerting + runbooks come in phase 7
+
+    prometheus = {
+      prometheusSpec = {
+        retention = "6h" # lab: no persistent volume, data lives as long as the pod
+        # Pick up ServiceMonitors from every namespace, not just this release's.
+        serviceMonitorSelectorNilUsesHelmValues = false
+        podMonitorSelectorNilUsesHelmValues     = false
+        resources = {
+          requests = { cpu = "200m", memory = "512Mi" }
+          limits   = { memory = "1536Mi" }
+        }
+      }
+    }
+
+    grafana = {
+      admin = {
+        existingSecret = kubernetes_secret_v1.grafana_admin[0].metadata[0].name
+        userKey        = "admin-user"
+        passwordKey    = "admin-password"
+      }
+      # Load dashboard ConfigMaps (label grafana_dashboard=1) from all namespaces,
+      # so the app ships its own dashboard.
+      sidecar = { dashboards = { searchNamespace = "ALL" } }
+    }
+  })]
+
+  depends_on = [helm_release.lb_controller]
+}
+
 # ---------- the app ----------
 
 resource "kubernetes_namespace_v1" "app" {
@@ -192,6 +313,10 @@ resource "helm_release" "app" {
       certificateArn = data.aws_acm_certificate.wildcard.arn
     }
 
+    metrics = {
+      enabled = var.enable_monitoring
+    }
+
     auth = local.auth_values
 
     database = {
@@ -208,5 +333,6 @@ resource "helm_release" "app" {
     helm_release.lb_controller,
     helm_release.external_dns,
     helm_release.external_secrets,
+    helm_release.kube_prometheus_stack, # ServiceMonitor CRD must exist first
   ]
 }

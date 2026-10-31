@@ -58,6 +58,28 @@ variable "external_secrets_chart_version" {
   default = "2.12.0"
 }
 
+variable "enable_monitoring" {
+  description = "kube-prometheus-stack (Prometheus + Grafana) and app metrics/dashboard."
+  type        = bool
+  default     = true
+}
+
+variable "kube_prometheus_stack_chart_version" {
+  type    = string
+  default = "92.16.1"
+}
+
+variable "cluster_autoscaler_chart_version" {
+  type    = string
+  default = "9.59.0"
+}
+
+variable "cluster_autoscaler_image_tag" {
+  description = "Should match the cluster's minor version. v1.37.0 was not yet published at build time (k8s.io PR #10146), so v1.36.1 runs one minor behind - bump when available."
+  type        = string
+  default     = "v1.36.1"
+}
+
 variable "enable_auth" {
   description = "Require Cognito sign-in at the ALB (pool from the foundation stack). /healthz and /readyz stay public."
   type        = bool

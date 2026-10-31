@@ -18,6 +18,10 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 3.2"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.7"
+    }
   }
 
   backend "s3" {

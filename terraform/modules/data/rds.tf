@@ -24,6 +24,9 @@ resource "aws_db_parameter_group" "this" {
   parameter {
     name  = "rds.force_ssl"
     value = "1"
+    # RDS reports this static parameter as pending-reboot; matching it here
+    # stops a perpetual "update in-place" in every plan.
+    apply_method = "pending-reboot"
   }
 
   parameter {

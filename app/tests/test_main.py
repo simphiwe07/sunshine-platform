@@ -43,6 +43,28 @@ def test_s3_is_503_without_bucket(monkeypatch):
     assert client.get("/s3").status_code == 503
 
 
+def test_burn_uses_cpu_for_roughly_the_requested_time():
+    import time
+
+    started = time.perf_counter()
+    body = client.get("/burn?ms=50").json()
+    assert body["burned_ms"] == 50
+    assert time.perf_counter() - started >= 0.05
+
+
+def test_burn_is_capped():
+    assert client.get("/burn?ms=999999").json()["burned_ms"] == 2000
+
+
+def test_metrics_count_requests_by_route_template():
+    client.get("/healthz")
+    client.get("/burn?ms=1")
+    text = client.get("/metrics").text
+    assert 'http_requests_total{method="GET",route="/healthz",status="200"}' in text
+    assert 'route="/burn"' in text
+    assert "ms=1" not in text  # query strings never become labels
+
+
 # ---------- identity: forge ALB + Cognito tokens with throw-away keys ----------
 
 import base64  # noqa: E402

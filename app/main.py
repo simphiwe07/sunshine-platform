@@ -8,6 +8,8 @@ Endpoints
   /db        Postgres version, server time and whether this connection uses TLS
   /visits    increments a counter row in Postgres
   /s3        writes an object to the app bucket with the task role, returns the count
+  /burn      burns CPU for ?ms= milliseconds - load simulation (HPA / node autoscaling)
+  /metrics   Prometheus metrics: request count and latency per route and status
   /me        who is signed in (ALB + Cognito), after verifying the ALB's signature
   /admin     only for the Cognito group "admin" - app-level authorisation
   /logout    ends the ALB session and the Cognito session
@@ -25,12 +27,42 @@ import urllib.request
 
 import jwt
 import psycopg
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 VERSION = os.getenv("APP_VERSION", "dev")
 
 app = FastAPI(title="sunshine-app", version=VERSION)
+
+# ---------- metrics (RED: rate, errors, duration) ----------
+# Labelled by route TEMPLATE (e.g. "/burn"), never the raw URL, so query strings
+# or IDs can't explode the number of time series (label cardinality).
+REQUESTS = Counter(
+    "http_requests_total", "HTTP requests", ["method", "route", "status"]
+)
+LATENCY = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request latency",
+    ["route"],
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10),
+)
+
+
+@app.middleware("http")
+async def record_metrics(request: Request, call_next):
+    started = time.perf_counter()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        route = request.scope.get("route")
+        path = getattr(route, "path", "unmatched")
+        if path != "/metrics":
+            REQUESTS.labels(request.method, path, str(status)).inc()
+            LATENCY.labels(path).observe(time.perf_counter() - started)
 
 
 def _task_metadata() -> dict:
@@ -150,6 +182,22 @@ def s3(response: Response) -> dict:
     return {"bucket": bucket, "wrote": key, "objects": listed.get("KeyCount", 0)}
 
 
+@app.get("/burn")
+def burn(ms: int = 100) -> dict:
+    """Busy-loop for `ms` milliseconds of CPU (capped at 2s).
+
+    A plain `def` endpoint runs in FastAPI's thread pool; the GIL limits each
+    pod to ~1 CPU, so more load needs more pods - exactly what the HPA and the
+    Cluster Autoscaler should provide.
+    """
+    ms = max(1, min(ms, 2000))
+    deadline = time.perf_counter() + ms / 1000
+    n = 0
+    while time.perf_counter() < deadline:
+        n += 1
+    return {"burned_ms": ms, "iterations": n, **TASK}
+
+
 # ---------- identity (ALB authenticates, the app verifies and authorises) ----------
 # The ALB forwards two headers after a Cognito sign-in:
 #   x-amzn-oidc-data         user claims (sub, email), signed by the ALB (ES256)
@@ -260,4 +308,9 @@ def logout() -> Response:
     for shard in range(4):
         response.delete_cookie(f"AWSELBAuthSessionCookie-{shard}", path="/", secure=True)
     return response
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 

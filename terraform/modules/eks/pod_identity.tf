@@ -8,6 +8,8 @@ locals {
       lb-controller = { namespace = "kube-system", service_account = "aws-load-balancer-controller" }
       external-dns  = { namespace = "external-dns", service_account = "external-dns" }
       app           = { namespace = "sunshine", service_account = "sunshine-app" }
+
+      cluster-autoscaler = { namespace = "kube-system", service_account = "cluster-autoscaler" }
     },
     # A known boolean, not "db_secret_arn != null": the ARN is unknown until the
     # database exists, and for_each keys must be known at plan time.
@@ -153,3 +155,60 @@ resource "aws_iam_role_policy" "app" {
   role   = aws_iam_role.pod["app"].id
   policy = data.aws_iam_policy_document.app.json
 }
+
+# ---------- Cluster Autoscaler: resize THIS cluster's node groups only ----------
+# Managed node groups tag their Auto Scaling group with
+# k8s.io/cluster-autoscaler/<cluster>=owned; the write actions are scoped to it.
+
+data "aws_iam_policy_document" "cluster_autoscaler" {
+  statement {
+    sid = "DiscoverNodeGroups"
+
+    actions = [
+      "autoscaling:DescribeAutoScalingGroups",
+      "autoscaling:DescribeAutoScalingInstances",
+      "autoscaling:DescribeLaunchConfigurations",
+      "autoscaling:DescribeScalingActivities",
+      "autoscaling:DescribeTags",
+      "ec2:DescribeImages",
+      "ec2:DescribeInstanceTypes",
+      "ec2:DescribeLaunchTemplateVersions",
+      "ec2:GetInstanceTypesFromInstanceRequirements",
+    ]
+
+    resources = ["*"] # describe/list calls have no resource-level permissions
+  }
+
+  statement {
+    sid       = "ReadOwnNodeGroups"
+    actions   = ["eks:DescribeNodegroup"]
+    resources = ["arn:${local.partition}:eks:*:${local.account_id}:nodegroup/${aws_eks_cluster.this.name}/*/*"]
+  }
+
+  statement {
+    sid = "ResizeOwnNodeGroups"
+
+    actions = [
+      "autoscaling:SetDesiredCapacity",
+      "autoscaling:TerminateInstanceInAutoScalingGroup",
+    ]
+
+    # Managed node group ASGs are named eks-<nodegroup>-<uuid>; the tag condition
+    # below additionally pins them to THIS cluster.
+    resources = ["arn:${local.partition}:autoscaling:*:${local.account_id}:autoScalingGroup:*:autoScalingGroupName/eks-*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/k8s.io/cluster-autoscaler/${aws_eks_cluster.this.name}"
+      values   = ["owned"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "cluster_autoscaler" {
+  #checkov:skip=CKV_AWS_355:Only describe calls without resource-level permissions use "*"
+  name   = "resize-own-node-groups"
+  role   = aws_iam_role.pod["cluster-autoscaler"].id
+  policy = data.aws_iam_policy_document.cluster_autoscaler.json
+}
+
