@@ -1,0 +1,18 @@
+{{- if .Values.metrics.enabled }}
+# Tells the Prometheus Operator to scrape /metrics on every pod behind the
+# Service, every 15s. New pods (HPA scale-out) are picked up automatically.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: sunshine-app
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "app.selector" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+{{- end }}

@@ -91,3 +91,9 @@ variable "human_admin_role" {
   type        = string
   default     = "AccountFullAccessRole"
 }
+
+variable "eks_node_max" {
+  description = "Upper bound for the Cluster Autoscaler (Spot nodes)."
+  type        = number
+  default     = 5
+}

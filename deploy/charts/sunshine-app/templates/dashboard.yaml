@@ -1,0 +1,14 @@
+{{- if and .Values.metrics.enabled .Values.metrics.dashboard }}
+# Grafana's sidecar loads every ConfigMap labelled grafana_dashboard=1 as a
+# dashboard - dashboards as code, versioned with the app.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sunshine-app-dashboard
+  labels:
+    grafana_dashboard: "1"
+    {{- include "app.labels" . | nindent 4 }}
+data:
+  sunshine-scaling.json: |-
+{{ .Files.Get "files/sunshine-scaling.json" | indent 4 }}
+{{- end }}

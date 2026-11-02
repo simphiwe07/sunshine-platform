@@ -132,6 +132,7 @@ module "eks" {
   name                    = local.name
   kubernetes_version      = var.eks_version
   node_kubernetes_version = var.eks_node_version
+  node_max                = var.eks_node_max
 
   private_subnet_ids      = module.network.private_subnet_ids
   node_security_group_ids = [module.data.app_security_group_id] # the DB trusts this SG

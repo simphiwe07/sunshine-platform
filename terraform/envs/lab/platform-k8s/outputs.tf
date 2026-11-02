@@ -16,6 +16,15 @@ output "cluster_name" {
   value = local.cluster_name
 }
 
+output "grafana" {
+  description = "How to open Grafana (not exposed publicly)."
+  value = var.enable_monitoring ? join("\n", [
+    "kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80",
+    "open http://localhost:3000  (user: admin)",
+    "password: kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d",
+  ]) : null
+}
+
 output "auth" {
   description = "Sign-in details (users: docs/runbooks/identity.md)."
   value = var.enable_auth ? {

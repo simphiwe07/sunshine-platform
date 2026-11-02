@@ -17,15 +17,25 @@ serviceAccount:
 
 resources:
   requests:
-    cpu: 100m
+    # 250m: big enough that a burst of pods no longer fits on 2 nodes, so the
+    # scaling drill exercises the Cluster Autoscaler, not just the HPA.
+    cpu: 250m
     memory: 128Mi
   limits:
     memory: 256Mi # no CPU limit: avoids throttling; requests drive scheduling/HPA
 
 autoscaling:
   minReplicas: 2
-  maxReplicas: 6
+  maxReplicas: 16
   targetCPUUtilizationPercentage: 60
+  # Scale up fast, scale down after 2 min of calm (default 5 min) - quicker lab feedback.
+  scaleDownStabilizationSeconds: 120
+
+metrics:
+  # ServiceMonitor for kube-prometheus-stack + NetworkPolicy rule for its Prometheus.
+  enabled: false
+  prometheusNamespace: monitoring
+  dashboard: true # Grafana dashboard ConfigMap (picked up by the Grafana sidecar)
 
 auth:
   # ALB authenticates every request against Cognito, except publicPaths.
