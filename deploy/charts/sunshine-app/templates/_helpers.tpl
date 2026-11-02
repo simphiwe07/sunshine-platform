@@ -26,4 +26,7 @@ alb.ingress.kubernetes.io/ssl-policy: {{ .Values.ingress.sslPolicy }}
 alb.ingress.kubernetes.io/healthcheck-path: /healthz
 alb.ingress.kubernetes.io/load-balancer-attributes: routing.http.drop_invalid_header_fields.enabled=true
 alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=30
+{{- with .Values.ingress.wafAclArn }}
+alb.ingress.kubernetes.io/wafv2-acl-arn: {{ . }}
+{{- end }}
 {{- end }}

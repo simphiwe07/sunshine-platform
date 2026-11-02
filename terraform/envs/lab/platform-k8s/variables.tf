@@ -63,3 +63,37 @@ variable "enable_auth" {
   type        = bool
   default     = true
 }
+
+variable "enable_waf" {
+  description = "AWS WAF web ACL on the app's ALB (managed rules, rate limit, geo allowlist, logs)."
+  type        = bool
+  default     = true
+}
+
+variable "waf_rate_limit" {
+  description = "Max requests per client IP per 60 s before WAF blocks it. Raise for load tests from one IP (the k6 drill sends ~40 req/s)."
+  type        = number
+  default     = 300
+
+  validation {
+    condition     = var.waf_rate_limit >= 10
+    error_message = "WAF rate-based rules need a limit of at least 10."
+  }
+}
+
+variable "waf_allowed_countries" {
+  description = "ISO country codes the app serves. Everything else matches the geo rule."
+  type        = list(string)
+  default     = ["ZA"]
+}
+
+variable "waf_geo_action" {
+  description = "count = log + label out-of-market requests; block = reject them. GitHub-hosted runners are in the US: in block mode the post-deploy smoke test is blocked too."
+  type        = string
+  default     = "count"
+
+  validation {
+    condition     = contains(["count", "block"], var.waf_geo_action)
+    error_message = "waf_geo_action must be count or block."
+  }
+}

@@ -23,3 +23,12 @@ output "auth" {
     user_pool_id = local.user_pool_id
   } : null
 }
+
+output "waf" {
+  description = "WAF web ACL and its log group (queries: docs/runbooks/waf.md)."
+  value = var.enable_waf ? {
+    web_acl   = aws_wafv2_web_acl.app[0].name
+    log_group = aws_cloudwatch_log_group.waf[0].name
+    geo       = "${var.waf_geo_action} outside ${join(",", var.waf_allowed_countries)}"
+  } : null
+}
