@@ -5,6 +5,7 @@ loadBalancerCidrs: [10.20.0.0/24, 10.20.1.0/24]
 ingress:
   host: eks.example.com
   certificateArn: arn:aws:acm:eu-west-1:000000000000:certificate/example
+  wafAclArn: arn:aws:wafv2:eu-west-1:000000000000:regional/webacl/example/00000000-0000-0000-0000-000000000000
 nlb:
   enabled: true
   host: nlb.example.com

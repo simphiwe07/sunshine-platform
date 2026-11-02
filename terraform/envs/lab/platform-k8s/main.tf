@@ -183,6 +183,7 @@ resource "helm_release" "app" {
     ingress = {
       host           = local.app_host
       certificateArn = data.aws_acm_certificate.wildcard.arn
+      wafAclArn      = try(aws_wafv2_web_acl.app[0].arn, "")
     }
 
     nlb = {

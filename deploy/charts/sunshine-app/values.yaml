@@ -50,6 +50,7 @@ ingress:
   certificateArn: ""
   sslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
   groupName: sunshine # several Ingresses can share one ALB
+  wafAclArn: "" # AWS WAF web ACL for the ALB (set by platform-k8s); "" = none
 
 nlb:
   enabled: true

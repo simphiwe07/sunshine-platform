@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Post-deploy smoke test: smoke.sh <url> [expected-git-sha] [auth]
+# Post-deploy smoke test: smoke.sh <url> [expected-git-sha] [checks: auth,waf]
 #  1. wait until the hostname resolves - asking Route 53's authoritative servers,
 #     so a too-early lookup can't leave a cached NXDOMAIN on the runner
 #  2. HTTPS answers and reports the expected version (else the rollout rolled back)
 #  3. /readyz proves the database path (skipped when the DB is disabled)
 #  4. with "auth": the app itself is NOT reachable without signing in
+#  5. with "waf":  an obvious attack probe is blocked (403) before the app
 set -euo pipefail
 
 URL="$1"
 EXPECTED="${2:-}"
-AUTH="${3:-}"
+CHECKS=",${3:-},"
 HOST="${URL#https://}"
 HOST="${HOST%%/*}"
 ZONE="${HOST#*.}"
@@ -50,7 +51,7 @@ elif [ "$CODE" != "200" ]; then
   exit 1
 fi
 
-if [ "$AUTH" = "auth" ]; then
+if [[ "$CHECKS" == *,auth,* ]]; then
   # Expect the ALB to send an anonymous request to the Cognito sign-in page.
   LOCATION=$(curl -sS -o /dev/null -w '%{redirect_url}' --max-time 10 "${RESOLVE[@]}" "$URL/")
   echo "anonymous GET / -> ${LOCATION:-no redirect}"
@@ -62,8 +63,17 @@ if [ "$AUTH" = "auth" ]; then
   [ "$CODE" = "404" ] || { echo "::error::/metrics is exposed through the ALB ($CODE)"; exit 1; }
 fi
 
+if [[ "$CHECKS" == *,waf,* ]]; then
+  # Harmless XSS-looking query on a public endpoint: WAF must answer, not the app.
+  CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${RESOLVE[@]}" -G "$URL/healthz" \
+    --data-urlencode 'q=<script>alert(1)</script>')
+  echo "XSS probe -> $CODE"
+  [ "$CODE" = "403" ] || { echo "::error::WAF did not block the XSS probe ($CODE)"; exit 1; }
+fi
+
 {
   echo "### Smoke test passed: $URL"
   echo "- version: \`${EXPECTED:-n/a}\`"
-  if [ "$AUTH" = "auth" ]; then echo "- sign-in enforced, /metrics blocked"; fi
+  if [[ "$CHECKS" == *,auth,* ]]; then echo "- sign-in enforced, /metrics blocked"; fi
+  if [[ "$CHECKS" == *,waf,* ]]; then echo "- WAF blocks attack probes"; fi
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
