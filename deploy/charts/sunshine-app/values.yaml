@@ -1,7 +1,5 @@
-# Everything environment-specific is passed in by Terraform (platform-k8s).
-
-# Changes when any chart file changes, so a template-only edit still rolls out.
-chartHash: ""
+# Environment settings come from Terraform (on the Argo CD Application); the
+# image - the version - from values-lab.yaml in Git.
 
 # Image by digest (repo@sha256:...) - exact scanned bytes, never a movable tag.
 image: ""

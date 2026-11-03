@@ -17,11 +17,6 @@ locals {
 
   app_host = "${var.app_hostname}.${var.domain_name}"
   nlb_host = var.nlb_hostname == "" ? "" : "${var.nlb_hostname}.${var.domain_name}"
-
-  chart_dir = "${path.module}/../../../../deploy/charts/sunshine-app"
-  # Helm only upgrades a release when its version or values change. Hashing the
-  # chart files makes a template-only change roll out too.
-  chart_hash = sha1(join("", [for f in sort(fileset(local.chart_dir, "**")) : filesha1("${local.chart_dir}/${f}")]))
 }
 
 data "aws_eks_cluster" "this" {
@@ -45,10 +40,11 @@ data "aws_ecr_repository" "app" {
   name = "${var.project}-app"
 }
 
+# The image Git says is deployed (values-lab.yaml) - for the app_version output
+# the post-deploy smoke test compares against.
 data "aws_ecr_image" "app" {
   repository_name = data.aws_ecr_repository.app.name
-  image_tag       = var.app_image_tag
-  most_recent     = var.app_image_tag == null ? true : null
+  image_digest    = split("@", local.gitops_values.image)[1]
 }
 
 # ---------- controllers ----------
@@ -285,54 +281,4 @@ resource "kubernetes_namespace_v1" "app" {
   }
 }
 
-resource "helm_release" "app" {
-  name      = "sunshine-app"
-  chart     = local.chart_dir
-  namespace = kubernetes_namespace_v1.app.metadata[0].name
-  wait      = true
-  timeout   = 600
-  atomic    = true # a release that never gets healthy is rolled back by Helm
-
-  values = [yamlencode({
-    chartHash = local.chart_hash
-    image     = "${data.aws_ecr_repository.app.repository_url}@${data.aws_ecr_image.app.image_digest}"
-    region    = var.region
-    bucket    = local.platform.app_bucket_name
-
-    loadBalancerCidrs = sort([for s in data.aws_subnet.public : s.cidr_block])
-
-    ingress = {
-      host           = local.app_host
-      certificateArn = data.aws_acm_certificate.wildcard.arn
-      wafAclArn      = try(aws_wafv2_web_acl.app[0].arn, "")
-    }
-
-    nlb = {
-      enabled        = local.nlb_host != ""
-      host           = local.nlb_host
-      certificateArn = data.aws_acm_certificate.wildcard.arn
-    }
-
-    metrics = {
-      enabled = var.enable_monitoring
-    }
-
-    auth = local.auth_values
-
-    database = {
-      enabled   = local.db_enabled
-      host      = try(local.platform.db_address, "")
-      name      = try(local.platform.db_name, "")
-      secretArn = try(local.platform.db_master_secret_arn, "")
-    }
-  })]
-
-  # Destroy order matters: the app (its Ingress/Service) goes FIRST, while the
-  # LB controller still runs to delete the ALB/NLB it created.
-  depends_on = [
-    helm_release.lb_controller,
-    helm_release.external_dns,
-    helm_release.external_secrets,
-    helm_release.kube_prometheus_stack, # ServiceMonitor CRD must exist first
-  ]
-}
+# The app itself is deployed by Argo CD from Git - see argocd.tf.

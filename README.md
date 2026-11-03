@@ -100,6 +100,7 @@ Debugging a task: set `enable_ecs_exec = true` (this also makes the root filesys
 - `platform` creates the cluster and everything AWS-side; `platform-k8s` installs the controllers (Helm) and the app chart (`deploy/charts/sunshine-app`).
 - App: `https://eks.<domain>` (ALB via Ingress) and `https://nlb.<domain>` (NLB via Service type LoadBalancer).
 - kubectl: `aws eks update-kubeconfig --name sunshine-lab --region eu-west-1 --profile sunshine`
+- **GitOps:** Argo CD deploys the app from Git. The version is `deploy/charts/sunshine-app/values-lab.yaml` (image digest). Deploy = `scripts/promote.sh <sha>` + PR; rollback = revert. See [docs/runbooks/gitops.md](docs/runbooks/gitops.md).
 - Sign-in: the app requires a Cognito login (except `/healthz`, `/readyz`); least-privilege kubectl personas. See [docs/runbooks/identity.md](docs/runbooks/identity.md).
 - **lab-down** deletes the Kubernetes-made load balancers first, then the k8s stack, then the platform.
 - Upgrades: [docs/runbooks/eks-upgrade.md](docs/runbooks/eks-upgrade.md).
@@ -121,4 +122,5 @@ Debugging a task: set `enable_ecs_exec = true` (this also makes the root filesys
 - [x] 5. EKS: Spot node group, access entries, Pod Identity, AWS LB Controller (ALB + NLB), ExternalDNS, External Secrets, HPA/PDB/NetworkPolicy - [upgrade runbook](docs/runbooks/eks-upgrade.md)
 - [x] 5b. Observability + autoscaling: kube-prometheus-stack (Grafana dashboards as code), app RED metrics, Cluster Autoscaler, k6 demand drill - [runbook](docs/runbooks/scaling-drill.md)
 - [x] 6. Identity: Cognito sign-in at the ALB (TOTP MFA, verified in the app), viewer/developer/admin personas: IAM role → EKS access entry → Kubernetes RBAC - [runbook](docs/runbooks/identity.md)
-- [ ] 7. Hardening: **WAF** on the ALB (managed rules, rate limit, geo allowlist, logs) - [runbook](docs/runbooks/waf.md); image signing/verification; alerting + runbooks (after observability)
+- [x] 8. GitOps: Argo CD (pull-based deploys, self-heal, prune, AppProject fence), version-by-digest in Git, promote/rollback by PR - [runbook](docs/runbooks/gitops.md)
+- [ ] 7. Hardening: **WAF** on the ALB (managed rules, rate limit, geo allowlist, logs) - [runbook](docs/runbooks/waf.md); image signing (designed, not deployed); alerting + runbooks

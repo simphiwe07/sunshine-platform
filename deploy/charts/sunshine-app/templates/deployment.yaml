@@ -19,8 +19,6 @@ spec:
     metadata:
       labels:
         {{- include "app.selector" . | nindent 8 }}
-      annotations:
-        sunshine/chart-hash: {{ .Values.chartHash | quote }}
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
       automountServiceAccountToken: false
