@@ -41,6 +41,11 @@ jobs:
           fi
           aws eks update-kubeconfig --name "$CLUSTER"
           # Finalizers make kubectl wait until the controller has deleted the ALB/NLB.
+          # Argo CD would re-create what we delete: remove its Applications first.
+          # Their finalizer makes Argo CD delete the app's objects (Ingress -> ALB).
+          if kubectl get crd applications.argoproj.io > /dev/null 2>&1; then
+            kubectl delete applications.argoproj.io --all -n argocd --wait --timeout=10m
+          fi
           kubectl delete ingress --all --all-namespaces --wait --timeout=10m
           kubectl get svc -A -o json \
             | jq -r '.items[] | select(.spec.type=="LoadBalancer") | "\(.metadata.namespace) \(.metadata.name)"' \
