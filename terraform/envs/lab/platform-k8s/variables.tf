@@ -35,12 +35,6 @@ variable "nlb_hostname" {
   default     = "nlb"
 }
 
-variable "app_image_tag" {
-  description = "Deploy this image tag (git SHA) instead of the newest one - e.g. to roll back."
-  type        = string
-  default     = null
-}
-
 # Chart versions are pinned: an upgrade is a reviewed PR, not a surprise.
 variable "lb_controller_chart_version" {
   description = "Keep in sync with lb_controller_version (IAM policy) in the eks module."
@@ -118,4 +112,27 @@ variable "waf_geo_action" {
     condition     = contains(["count", "block"], var.waf_geo_action)
     error_message = "waf_geo_action must be count or block."
   }
+}
+
+variable "argocd_chart_version" {
+  description = "argo-cd chart 10.10.x = Argo CD v3.5."
+  type        = string
+  default     = "10.10.2"
+}
+
+variable "argocd_apps_chart_version" {
+  type    = string
+  default = "2.0.7"
+}
+
+variable "gitops_revision" {
+  description = "Git branch/tag/commit Argo CD deploys the app from."
+  type        = string
+  default     = "main"
+}
+
+variable "github_repository" {
+  description = "owner/repo Argo CD reads the app chart and its version from."
+  type        = string
+  default     = "simphiwe07/sunshine-platform"
 }

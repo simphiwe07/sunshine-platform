@@ -8,7 +8,7 @@ output "nlb_url" {
 }
 
 output "app_version" {
-  description = "Git SHA of the deployed image."
+  description = "Git SHA of the image Git says is deployed (values-lab.yaml)."
   value       = try([for t in data.aws_ecr_image.app.image_tags : t if length(t) == 40][0], null)
 }
 
@@ -40,4 +40,13 @@ output "waf" {
     log_group = aws_cloudwatch_log_group.waf[0].name
     geo       = "${var.waf_geo_action} outside ${join(",", var.waf_allowed_countries)}"
   } : null
+}
+
+output "argocd" {
+  description = "How to open Argo CD (not exposed publicly)."
+  value = join("\n", [
+    "kubectl -n argocd port-forward svc/argocd-server 8080:443",
+    "open https://localhost:8080  (self-signed certificate; user: admin)",
+    "password: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d",
+  ])
 }

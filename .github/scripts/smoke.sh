@@ -29,16 +29,21 @@ done
 RESOLVE=(--resolve "$HOST:443:$IP")
 
 BODY=""
-for _ in $(seq 1 30); do # load balancer still provisioning / targets registering
+# Up to 10 min: the load balancer may still be provisioning, and with GitOps the
+# new version arrives asynchronously (Argo CD polls Git, then rolls the pods).
+for _ in $(seq 1 60); do
   # /healthz: public even when the rest of the app requires sign-in
-  BODY=$(curl -fsS --max-time 5 "${RESOLVE[@]}" "$URL/healthz") && break
+  BODY=$(curl -fsS --max-time 5 "${RESOLVE[@]}" "$URL/healthz") || BODY=""
+  if [ -n "$BODY" ] && { [ -z "$EXPECTED" ] || grep -q "\"version\":\"$EXPECTED\"" <<< "$BODY"; }; then
+    break
+  fi
   sleep 10
 done
 [ -n "$BODY" ] || { echo "::error::$URL never answered"; exit 1; }
 echo "$BODY"
 
 if [ -n "$EXPECTED" ] && ! grep -q "\"version\":\"$EXPECTED\"" <<< "$BODY"; then
-  echo "::error::live version is not $EXPECTED - the deployment was rolled back"
+  echo "::error::live version is not $EXPECTED after 10 min - sync failed or the rollout was stuck (check Argo CD)"
   exit 1
 fi
 
