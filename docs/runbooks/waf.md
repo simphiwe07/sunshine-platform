@@ -24,7 +24,7 @@ aws wafv2 get-web-acl-for-resource --resource-arn "$LB" --query 'WebACL.[Name,Ru
 All against the public `/healthz`, so no sign-in is needed:
 
 ```bash
-U=https://eks.simptechit.click/healthz
+U=https://dev.simptechit.click/healthz
 code() { curl -s -o /dev/null -w '%{http_code}  ' "$@"; }
 
 code "$U";                                                         echo "normal request (200)"
@@ -40,7 +40,7 @@ A blocked request gets a plain 403 from WAF (body `403 Forbidden`), not JSON fro
 ## 2. Rate limit (flood from one IP)
 
 ```bash
-hey -z 90s -c 10 https://eks.simptechit.click/healthz | sed -n '/Status code distribution/,$p'
+hey -z 90s -c 10 https://dev.simptechit.click/healthz | sed -n '/Status code distribution/,$p'
 ```
 
 Expect `[200]` first, then `[403]` once WAF's counter passes 300 in 60 s. WAF checks rates about every 10 s, so the switch takes a few seconds. While it lasts, you're blocked in the browser too; it lifts by itself within about a minute after you stop.
@@ -89,7 +89,7 @@ cd terraform/envs/lab/platform-k8s
 export TF_VAR_state_bucket=sunshine-tfstate-033147048268
 terraform init -backend-config="bucket=$TF_VAR_state_bucket"
 terraform apply -var 'waf_geo_action=block' -var 'waf_allowed_countries=["IE"]'
-curl -s -o /dev/null -w '%{http_code}\n' https://eks.simptechit.click/healthz    # 403 - you are in ZA
+curl -s -o /dev/null -w '%{http_code}\n' https://dev.simptechit.click/healthz    # 403 - you are in ZA
 terraform apply                                                                    # back to defaults
 ```
 
@@ -104,7 +104,7 @@ Lessons for production:
 |---|---|
 | A real user gets 403 | Run the "Blocked, by rule" query and take `terminatingRuleId`. If it's a false positive, override that single managed rule to count (`rule_action_override`). Don't disable the whole group. |
 | Signed-in users get 403 after a while | Core rule set size limits: the ALB session cookie (`AWSELBAuthSessionCookie-*`) can be large. Check whether the rule is `SizeRestrictions_*`. |
-| Smoke test "WAF did not block the XSS probe (200)" | Web ACL not attached (LB controller events: `kubectl -n sunshine describe ingress sunshine-app`), or `enable_waf = false`. |
+| Smoke test "WAF did not block the XSS probe (200)" | Web ACL not attached (LB controller events: `kubectl -n sunshine-dev describe ingress sunshine-app`), or `enable_waf = false`. |
 | `terraform destroy` "WAFAssociatedItemException" | The ALB still uses the ACL. lab-down deletes the Ingresses (and so the ALB) first. Run it, or delete the Ingress by hand. |
 
 ## Interview notes

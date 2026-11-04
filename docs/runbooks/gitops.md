@@ -1,96 +1,105 @@
-# GitOps with Argo CD: deploy, roll back, drift
+# GitOps across environments: develop → dev, release → staging, main → prod
 
 ```
-code change ──PR──► main ──app workflow──► image in ECR (sha + digest)
-                                               │
-       scripts/promote.sh <sha>  ◄─────────────┘   (writes the digest)
-                 │
-   deploy PR: deploy/charts/sunshine-app/values-lab.yaml ──merge──► main
-                                                                     │
-   Argo CD (in the cluster) polls Git every ~1 min ──sees a change───┘
-        └─► helm template (chart + values-lab.yaml + Terraform's environment values)
-        └─► kubectl apply ──► rolling update (readiness gates, PDB, maxUnavailable 0)
+feature/x ──PR──► develop ──push──► deliver: build+scan+push image app-<tree>, tag <sha> ──► env/dev ──► Argo CD (non-prod) ──► sunshine-dev
+                     │
+                     └─ cut release/1.4 ──push──► deliver: SAME image (same app/ tree), tag <sha> ──► env/staging ──► Argo CD (non-prod) ──► sunshine-staging
+                                  │
+                                  └─ PR release/1.4 → main ──merge──► deliver: check main == staging, approval ──► env/prod ──► Argo CD (prod account) ──► prod
 ```
 
-**Who owns what.** Terraform owns the platform and Argo CD, plus the Application with the environment settings. **Git** owns the app's version and chart. Argo CD keeps the cluster equal to Git. Nobody runs `helm upgrade` or `kubectl apply` for the app any more.
+| Environment | Branch that deploys | Cluster / account | Namespace | URL |
+|---|---|---|---|---|
+| dev | `develop` | non-prod cluster, this account | `sunshine-dev` | https://dev.simptechit.click |
+| staging | `release/*` | non-prod cluster, this account | `sunshine-staging` | https://staging.simptechit.click |
+| prod | `main` (release merged) | prod cluster, **prod account** (stage 2) | `sunshine-prod` | `vars.PROD_APP_URL` |
+
+**Rules the pipeline enforces (`.github/workflows/deliver.yml`):**
+- **Build once.** An image is keyed by the git tree hash of `app/` (`app-<tree>`). Any commit with the same `app/` reuses it and only gets a new tag (its commit SHA, same digest), so staging and prod run the bytes dev built and Trivy scanned.
+- **Deploy = move a pointer.** `env/dev`, `env/staging` and `env/prod` are branches that only CI moves, and only **after** the commit's image exists. Argo CD follows the pointer and deploys `<repo>:<commit>`, via `imageTag = $ARGOCD_APP_REVISION`.
+- **Prod only runs what staging runs.** On `main`, `app/` and the chart must have exactly the tree hashes that `env/staging` has, or the deploy fails. Then the GitHub environment `prod` waits for an approval.
+- **Verified.** Each deploy waits until `<url>/healthz` reports `"revision": "<commit>"`.
+
+Who owns what: **Terraform** owns the clusters, Argo CD, and the Applications with each environment's settings (host, certificate, sign-in, WAF, database). **Git** owns the code and chart; `env/*` records what runs where. **Argo CD** keeps every namespace equal to its pointer, with sync, self-heal and prune.
+
+## One-time setup (stage 1: dev + staging)
+
+1. **Bootstrap.** Let the ECR push role trust `develop` and `release/*`. Apply locally, as before:
+   `cd terraform/bootstrap && terraform apply`
+2. **GitHub environments** (Settings → Environments):
+   - Create `dev` and `staging`, with no rules.
+   - Create `prod` with **Required reviewers** (you) and **Deployment branches: `main`** only.
+   - Leave the repository variable `PROD_ENABLED` unset until stage 2. Prod deploys are skipped until then.
+3. **The develop branch:**
+   ```bash
+   git checkout main && git pull && git checkout -b develop && git push -u origin develop
+   ```
+   In repo settings, protect `develop` like `main`: PRs and checks required.
+4. **First deploys:** Actions → **deliver** → Run workflow:
+   - From `develop`, with environment `dev`. This creates `env/dev`.
+   - Then create `release/0.1` from `develop`, push it, and run the workflow on it with environment `staging`. This creates `env/staging`.
+
+   A new branch with no file changes doesn't trigger the push event, hence the manual run the first time.
+5. **lab-up.** Argo CD creates `sunshine-app-dev` and `sunshine-app-staging` and syncs them:
+   ```bash
+   kubectl -n argocd get applications            # both Synced / Healthy
+   curl -s https://dev.simptechit.click/healthz; curl -s https://staging.simptechit.click/healthz
+   ```
+
+## Day to day
+
+**A feature to dev:**
+```bash
+git checkout develop && git pull && git checkout -b feature/greeting
+# edit app/main.py, e.g. "greeting": "hello" in root()
+git commit -am "app: greeting" && git push -u origin feature/greeting   # PR into develop (app checks run)
+```
+Merging into `develop` runs **deliver → dev**: a new `app/` tree, so it builds, scans and pushes. Then `env/dev` moves, and the job waits until dev reports the commit.
+
+**Cut a release to staging:**
+```bash
+git checkout develop && git pull && git checkout -b release/1.0 && git push -u origin release/1.0
+# then Actions > deliver > Run workflow on release/1.0, environment staging (first push of a new branch)
+```
+The job summary shows "image already built - **reused**": staging runs the bytes dev ran. Fixes go onto the release branch; each push redeploys staging, and building only happens if `app/` changed.
+
+**Release to prod** (stage 2): open a PR `release/1.0 → main`, then merge. **deliver → prod** checks that main matches staging, waits for your approval, then moves `env/prod`. Afterwards merge `main` back into `develop` (GitFlow).
+
+**Roll back** any environment: Actions → **deliver** → Run workflow with the environment and the SHA to go back to. The previous SHA is in the last deploy's summary, and `git log origin/env/<name>` lists them. The image still exists (ECR keeps the newest 15), so it's tagged again, the pointer moves back, and the run waits for the result.
+
+## Drift and self-heal
+
+```bash
+kubectl -n sunshine-dev delete service sunshine-app              # gone...
+kubectl -n argocd get application sunshine-app-dev -w           # ...back within seconds
+kubectl -n sunshine-dev set image deploy/sunshine-app app=public.ecr.aws/nginx/nginx:1.29   # a hand "hotfix"
+kubectl -n sunshine-dev get deploy sunshine-app -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'   # reverted
+```
+Emergency: pause automation on one Application, fix, commit the fix, then switch it back on:
+`kubectl -n argocd patch application sunshine-app-staging --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'`
 
 ## Open Argo CD
 
 ```bash
-kubectl -n argocd port-forward svc/argocd-server 8080:443
-# https://localhost:8080 - accept the self-signed certificate; user: admin
+kubectl -n argocd port-forward svc/argocd-server 8080:443        # https://localhost:8080, user admin
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
 ```
-Or without the UI:
-```bash
-kubectl -n argocd get applications            # SYNC STATUS: Synced, HEALTH: Healthy
-kubectl -n argocd get application sunshine-app -o jsonpath='{.status.sync.revision}{"\n"}'   # Git commit deployed
-```
-
-## Drill 1: deploy a new version
-
-1. **Change the app.** For example, in `app/main.py` add `"greeting": "hello from v2"` to the `root()` response. PR, CI, merge.
-2. **Wait for the app workflow.** It tests, scans and pushes `sunshine-app:<sha>`. Note the sha.
-3. **Promote it.** Create the deploy PR:
-   ```bash
-   git checkout main && git pull
-   scripts/promote.sh            # newest image (or: scripts/promote.sh <sha>)
-   git checkout -b deploy/<short-sha> && git commit -am "deploy: sunshine-app <short-sha>"
-   git push -u origin deploy/<short-sha>      # open the PR - the diff is ONE line: the digest
-   ```
-4. **Merge, then watch Argo CD roll it out** (no pipeline touches the cluster):
-   ```bash
-   kubectl -n argocd get application sunshine-app -w          # OutOfSync -> Syncing -> Synced/Healthy
-   kubectl -n sunshine get pods -w                            # new pods Ready one by one, old ones terminate
-   while true; do curl -s https://eks.simptechit.click/healthz; echo; sleep 2; done   # version flips, no errors
-   ```
-
-Record the time from merge to sync start (about 1 minute of polling) and from sync to all pods new.
-
-## Drill 2: roll back
-
-```bash
-git revert <merge commit of the deploy PR>     # or: scripts/promote.sh <previous sha>
-# PR -> merge -> Argo CD rolls back to the old digest
-```
-Rollback is the same path as a deploy: reviewed, recorded, repeatable. `git log deploy/charts/sunshine-app/values-lab.yaml` is the deployment history.
-
-## Drill 3: drift and self-heal
-
-```bash
-kubectl -n sunshine delete service sunshine-app                        # someone deletes a resource
-kubectl -n argocd get application sunshine-app -w                      # OutOfSync -> Synced within seconds
-kubectl -n sunshine get svc sunshine-app                               # back
-
-kubectl -n sunshine set image deploy/sunshine-app app=public.ecr.aws/nginx/nginx:1.29   # a hand-made "hotfix"
-kubectl -n sunshine get deploy sunshine-app -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'  # back to the Git digest
-```
-Lesson: with self-heal, the cluster can't silently drift from Git. Hand-made fixes are reverted, so fixes must go through Git. Emergency option: pause automation on the Application (`kubectl -n argocd patch application sunshine-app --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'`), fix, then commit the fix and switch it back on.
-
-## How the switch from Terraform happened
-
-Terraform used to install the app (`helm_release.app`). A `removed { lifecycle { destroy = false } }` block makes Terraform forget that release without uninstalling it. Argo CD's Application uses the same release name, so it renders identical objects and **adopts** them: no downtime, same ALB. The old Helm bookkeeping Secret stays behind; delete it once Argo CD shows Synced:
-```bash
-kubectl -n sunshine get secret -l owner=helm,name=sunshine-app
-kubectl -n sunshine delete secret -l owner=helm,name=sunshine-app
-```
-Don't run `helm uninstall sunshine-app`: that deletes the objects Argo CD now manages.
 
 ## If something breaks
 
 | Symptom | Look at |
 |---|---|
-| Application `OutOfSync` and not syncing | `kubectl -n argocd describe application sunshine-app` (conditions). Repo unreachable? Wrong path? Project not allowing the repo or namespace? |
-| `Synced` but `Degraded` / `Progressing` forever | The rollout is failing: `kubectl -n sunshine get pods`, `describe pod` (image pull? readiness?). Fix it in Git, or revert the deploy PR. |
-| Smoke test "live version is not <sha> after 10 min" | The deploy PR isn't merged, or the sync failed. `kubectl -n argocd get application sunshine-app` |
-| lab-down hangs on the Application | Its finalizer waits for Argo CD to delete the app's objects. Check the Ingress (the ALB deletion) and the LB controller logs. |
-| Change in Terraform's environment values not applied | Run lab-up (Terraform updates the Application); Argo CD then syncs it. |
+| deliver: "not the image built for this app/ tree" | A commit SHA tag points at other bytes (an old pipeline pushed it). Check in ECR; don't re-tag by hand. |
+| deliver prod: "differs from what staging runs" | Something reached `main` without going through a release branch. Release it properly, or roll staging forward first. |
+| deliver: "did not report revision ... within 10 min" | Is the lab up? `kubectl -n argocd get applications`, then `describe application` (conditions), then pods in the namespace. |
+| Application `Unknown` / "unable to resolve env/staging" | The pointer branch doesn't exist yet. Run deliver once for that environment. |
+| Pods `ImagePullBackOff` for `<repo>:<sha>` | Someone moved `env/*` by hand without deliver tagging the image. Run deliver for that SHA. |
+| A deploy to the wrong environment | `prod` only accepts `main` (environment branch rule) and needs approval; `dev`/`staging` follow their branches. |
 
 ## Interview notes
 
-- **Push vs pull:** CI used to push deploys into the cluster with cluster-admin credentials. Now the cluster pulls from Git, so CI no longer needs cluster credentials, and the desired state is always visible in Git.
-- **Separate code and deploy changes:** app PRs build images, and deploy PRs change one digest line. Promotion and rollback are reviewed, recorded commits.
-- **Self-heal and prune** guarantee no drift and no leftovers; the trade-off is that emergency hand fixes need the pause switch.
-- **The AppProject is a fence:** this app may only come from our repo, only into `sunshine`, with no cluster-scoped objects (CRDs, ClusterRoles).
-- **Environment config vs version:** Terraform knows the infrastructure facts (ARNs, endpoints) and writes them into the Application. Git holds what changes per release. Precedence (`valuesObject` over `valueFiles`) is designed so Terraform never changes the version.
-- **Next steps in production:** a webhook instead of polling; SSO for the UI (Cognito OIDC, Dex); CI opening the deploy PR automatically, or Argo CD Image Updater writing back to Git; an ApplicationSet for several environments; sync waves for ordered rollouts.
+- **Build once, promote the artifact:** the image is keyed by source content (`app/` tree hash), so promotion is a re-tag with an identical digest. Prod runs what staging tested, enforced by tree-hash comparison and not by convention.
+- **Pull-based CD:** CI never gets cluster credentials. It moves a Git pointer; Argo CD in each cluster pulls. Prod sits in another account and CI still needs no access to it.
+- **Environment pointers vs value files:** pointers give a deployment log (`git log env/prod`), a trivial rollback, and no CI commits on protected branches. Value files per environment are the other common pattern; they fit better when environments differ in config, not just version.
+- **Isolation:** dev and staging are namespaces on one non-prod cluster (cost), with RBAC, NetworkPolicy and separate hosts. Prod has its own account, so separate IAM, quotas, blast radius and billing. Developers can restart pods in dev and staging, but not in prod.
+- **Gates:** PR checks into `develop`/`main`, the tree-hash promotion check, and the approval for prod in a GitHub environment restricted to `main`.

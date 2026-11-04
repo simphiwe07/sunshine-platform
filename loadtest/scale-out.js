@@ -13,7 +13,7 @@
 import http from 'k6/http';
 import { check } from 'k6';
 
-const BASE = __ENV.BASE_URL || 'https://eks.simptechit.click';
+const BASE = __ENV.BASE_URL || 'https://dev.simptechit.click';
 const BURN_MS = __ENV.BURN_MS || '200';
 const PEAK = parseInt(__ENV.PEAK_RPS || '40', 10);
 const HOLD = __ENV.HOLD || '8m';

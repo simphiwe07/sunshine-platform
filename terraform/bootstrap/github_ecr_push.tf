@@ -1,6 +1,7 @@
 # GitHub Actions: push the app image to ECR - and nothing else.
-# Trusted only for workflows running on main; pull requests build and scan
-# without any AWS access at all.
+# Trusted only for the delivery branches (develop -> dev, release/* -> staging,
+# main -> prod); pull requests and feature branches build and scan without any
+# AWS access at all.
 
 locals {
   app_repository_arn = "arn:${local.partition}:ecr:${var.region}:${local.account_id}:repository/${var.prefix}-app"
@@ -22,9 +23,13 @@ data "aws_iam_policy_document" "ecr_push_trust" {
     }
 
     condition {
-      test     = "StringEquals"
+      test     = "StringLike" # release/* needs a wildcard
       variable = "${local.oidc_host}:sub"
-      values   = ["${local.gh_subject}:ref:refs/heads/main"]
+      values = [
+        "${local.gh_subject}:ref:refs/heads/main",
+        "${local.gh_subject}:ref:refs/heads/develop",
+        "${local.gh_subject}:ref:refs/heads/release/*",
+      ]
     }
   }
 }

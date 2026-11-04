@@ -149,4 +149,5 @@ module "eks" {
   enable_external_secrets = var.enable_database
   db_secret_arn           = module.data.db_master_secret_arn
   app_bucket_arn          = module.data.app_bucket_arn
+  app_namespaces          = [for env in var.app_envs : "${var.project}-${env}"]
 }

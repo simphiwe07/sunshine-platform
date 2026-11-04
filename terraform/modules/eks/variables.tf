@@ -128,6 +128,12 @@ variable "db_secret_arn" {
   default     = null
 }
 
+variable "app_namespaces" {
+  description = "Namespaces the app runs in on this cluster (one per environment, e.g. sunshine-dev, sunshine-staging)."
+  type        = list(string)
+  default     = ["sunshine"]
+}
+
 variable "app_bucket_arn" {
   description = "Bucket the app's service account may read/write."
   type        = string

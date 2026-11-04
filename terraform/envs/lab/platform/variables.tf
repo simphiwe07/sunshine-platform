@@ -97,3 +97,9 @@ variable "eks_node_max" {
   type        = number
   default     = 5
 }
+
+variable "app_envs" {
+  description = "Environments this account's cluster hosts, one namespace each (sunshine-<env>). Non-prod: dev + staging; prod account: prod."
+  type        = list(string)
+  default     = ["dev", "staging"]
+}

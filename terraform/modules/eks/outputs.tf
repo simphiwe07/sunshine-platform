@@ -23,7 +23,7 @@ output "node_role_arn" {
 }
 
 output "pod_identity_role_arns" {
-  value = { for k, r in aws_iam_role.pod : k => r.arn }
+  value = merge({ for k, r in aws_iam_role.pod : k => r.arn }, { app = aws_iam_role.app.arn })
 }
 
 output "persona_role_arns" {

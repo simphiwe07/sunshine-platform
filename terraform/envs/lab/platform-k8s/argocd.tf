@@ -1,22 +1,22 @@
-# ---------- GitOps: Argo CD deploys the app from Git ----------
+# ---------- GitOps: Argo CD deploys each environment from its pointer branch ----------
+#
+#   develop        --CI: build/scan/push, tag image <sha>--> moves env/dev
+#   release/x.y    --CI: reuse image (same app/), tag <sha>--> moves env/staging
+#   main (release) --CI: same image staging tested + approval--> moves env/prod
+#
+#   Argo CD here follows env/dev + env/staging (prod: Argo CD in the prod
+#   account follows env/prod). imageTag = $ARGOCD_APP_REVISION = the commit the
+#   pointer is on; CI tagged that commit's image BEFORE moving the pointer.
 #
 #   who owns what
-#   Terraform  the platform (controllers, monitoring, WAF) + Argo CD itself +
-#              the Application object, carrying the ENVIRONMENT settings it
-#              knows (certificate, sign-in, WAF, database, subnets)
-#   Git        the app VERSION: deploy/charts/sunshine-app/values-lab.yaml
-#              (image digest) + the chart - a PR is a deploy, a revert a rollback
-#   Argo CD    keeps the cluster equal to Git: polls the repo, syncs changes,
-#              puts back anything changed by hand (self-heal), deletes what was
-#              removed from Git (prune)
-#
-# Precedence in the Application (high -> low): valuesObject (Terraform) >
-# valueFiles (values-lab.yaml in Git) > chart defaults. The image is ONLY in
-# Git, so a Terraform apply never changes the running version.
+#   Terraform  platform, Argo CD, the Applications + ENVIRONMENT settings
+#              (certificate, sign-in, WAF, database, hostnames, subnets)
+#   Git        the chart and the app; env/<name> = what runs where (history =
+#              deployment log; rollback = move the pointer back)
+#   Argo CD    keeps each namespace equal to its pointer: sync, self-heal, prune
 
 locals {
-  gitops_repo   = "https://github.com/${var.github_repository}"
-  gitops_values = yamldecode(file("${path.module}/../../../../deploy/charts/sunshine-app/values-lab.yaml"))
+  gitops_repo = "https://github.com/${var.github_repository}"
 }
 
 resource "helm_release" "argocd" {
@@ -56,55 +56,59 @@ resource "helm_release" "argocd_apps" {
   wait       = true
 
   values = [yamlencode({
-    # A project per team/app = a fence: this app may only come from our repo
-    # and only land in its namespace, and may create no cluster-wide objects
-    # (no CRDs, ClusterRoles, ...): clusterResourceWhitelist is empty.
+    # A project = a fence: these apps may only come from our repo, only land in
+    # the app namespaces, and may create no cluster-wide objects (no CRDs,
+    # ClusterRoles, ...): clusterResourceWhitelist is empty.
     projects = {
       sunshine = {
         namespace   = "argocd"
-        description = "sunshine-app: our repo -> namespace sunshine only"
+        description = "sunshine-app: our repo -> app namespaces only"
         finalizers  = ["resources-finalizer.argocd.argoproj.io"]
         sourceRepos = [local.gitops_repo]
-        destinations = [{
+        destinations = [for ns in values(local.app_namespaces) : {
           server    = "https://kubernetes.default.svc"
-          namespace = kubernetes_namespace_v1.app.metadata[0].name
+          namespace = ns
         }]
       }
     }
 
     applications = {
-      # Name = Helm release name = app.kubernetes.io/instance label, the same
-      # as when Terraform deployed it, so Argo CD adopts the running objects
-      # (Deployment selectors are immutable) instead of replacing them.
-      sunshine-app = {
+      for env, cfg in var.app_envs : "sunshine-app-${env}" => {
         namespace = "argocd"
         project   = "sunshine"
-        # Deleting the Application deletes what it deployed (Ingress -> ALB).
+        # Deleting the Application deletes what it deployed (Ingress -> ALB rules).
         finalizers = ["resources-finalizer.argocd.argoproj.io"]
         source = {
           repoURL        = local.gitops_repo
-          targetRevision = var.gitops_revision
+          targetRevision = cfg.branch # env/<name>: moved only by CI, after the image exists
           path           = "deploy/charts/sunshine-app"
           helm = {
             releaseName = "sunshine-app"
-            valueFiles  = ["values-lab.yaml"]
+            # The commit being deployed picks its own image (tag = commit SHA).
+            parameters = [{ name = "imageTag", value = "$ARGOCD_APP_REVISION" }]
             valuesObject = {
+              imageRepository   = local.image_repository
               region            = var.region
               bucket            = local.platform.app_bucket_name
               loadBalancerCidrs = sort([for s in data.aws_subnet.public : s.cidr_block])
               ingress = {
-                host           = local.app_host
+                host           = local.app_hosts[env]
                 certificateArn = data.aws_acm_certificate.wildcard.arn
                 wafAclArn      = try(aws_wafv2_web_acl.app[0].arn, "")
               }
               nlb = {
-                enabled        = local.nlb_host != ""
-                host           = local.nlb_host
+                enabled        = false # one ALB (IngressGroup) serves every environment's host
+                host           = ""
                 certificateArn = data.aws_acm_certificate.wildcard.arn
               }
-              metrics = { enabled = var.enable_monitoring }
-              auth    = local.auth_values
+              metrics = {
+                enabled   = var.enable_monitoring
+                dashboard = cfg.dashboard
+              }
+              auth = merge(local.auth_values, { logoutUrl = local.auth_logout_urls[env] })
               database = {
+                # Non-prod: dev + staging share the account's RDS instance.
+                # Prod runs in its own account with its own database.
                 enabled   = local.db_enabled
                 host      = try(local.platform.db_address, "")
                 name      = try(local.platform.db_name, "")
@@ -115,7 +119,7 @@ resource "helm_release" "argocd_apps" {
         }
         destination = {
           server    = "https://kubernetes.default.svc"
-          namespace = kubernetes_namespace_v1.app.metadata[0].name
+          namespace = kubernetes_namespace_v1.app[env].metadata[0].name
         }
         syncPolicy = {
           automated = {

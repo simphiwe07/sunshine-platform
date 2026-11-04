@@ -7,7 +7,6 @@ locals {
     {
       lb-controller = { namespace = "kube-system", service_account = "aws-load-balancer-controller" }
       external-dns  = { namespace = "external-dns", service_account = "external-dns" }
-      app           = { namespace = "sunshine", service_account = "sunshine-app" }
 
       cluster-autoscaler = { namespace = "kube-system", service_account = "cluster-autoscaler" }
     },
@@ -150,9 +149,34 @@ data "aws_iam_policy_document" "app" {
   }
 }
 
+# One role for the app, linked to its service account in EVERY app namespace
+# of this cluster (dev + staging share the non-prod bucket; prod has its own
+# account and bucket).
+resource "aws_iam_role" "app" {
+  name               = "${var.name}-pod-app"
+  description        = "Pod Identity: sunshine-app in ${join(", ", var.app_namespaces)}"
+  assume_role_policy = data.aws_iam_policy_document.pod_identity_assume.json
+  tags               = var.tags
+}
+
+moved {
+  from = aws_iam_role.pod["app"]
+  to   = aws_iam_role.app
+}
+
+resource "aws_eks_pod_identity_association" "app" {
+  for_each = toset(var.app_namespaces)
+
+  cluster_name    = aws_eks_cluster.this.name
+  namespace       = each.value
+  service_account = "sunshine-app"
+  role_arn        = aws_iam_role.app.arn
+  tags            = var.tags
+}
+
 resource "aws_iam_role_policy" "app" {
   name   = "app-bucket"
-  role   = aws_iam_role.pod["app"].id
+  role   = aws_iam_role.app.id
   policy = data.aws_iam_policy_document.app.json
 }
 

@@ -1,6 +1,0 @@
-# GitOps: the app version running in the lab. Argo CD deploys exactly this
-# (by digest - the scanned bytes, never a movable tag). Change it only by PR:
-#   scripts/promote.sh [git-sha]   -> writes the digest of that build
-# Rollback = revert the PR. Environment settings (certificate, sign-in, WAF,
-# database) are not here - Terraform puts them on the Argo CD Application.
-image: 033147048268.dkr.ecr.eu-west-1.amazonaws.com/sunshine-app@sha256:c8e279ed24b16e18595b78159bab05c5135d8007af63ea3e568560d67457f54f

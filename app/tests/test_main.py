@@ -19,6 +19,7 @@ def test_healthz_does_not_need_the_database(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
     assert "version" in resp.json()  # public endpoint the smoke test reads
+    assert "revision" in resp.json()  # which commit this environment runs
 
 
 def test_readyz_is_503_without_database(monkeypatch):

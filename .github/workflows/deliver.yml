@@ -1,0 +1,266 @@
+# Continuous delivery: a branch decides the environment.
+#
+#   push to develop       -> dev      (non-prod cluster, namespace sunshine-dev)
+#   push to release/**    -> staging  (non-prod cluster, namespace sunshine-staging)
+#   push to main          -> prod     (prod account, after approval in the GitHub
+#                                      environment "prod"; only the app/ code that
+#                                      staging is running)
+#
+# Build once, promote the same bytes: an image is keyed by the git tree hash of
+# app/ (tag app-<tree>). A commit whose app/ already has an image REUSES it and
+# just gets an extra tag (its commit SHA) - so the merge of release/x.y into main
+# runs exactly the image staging tested, never a rebuild.
+#
+# Deploy = move the pointer branch env/<name> to the commit, AFTER its image
+# exists. Argo CD follows the pointer and deploys image <repo>:<commit>.
+# Rollback = run this workflow (Run workflow) with an older commit SHA.
+name: deliver
+
+on:
+  push:
+    branches: [develop, "release/**", main]
+    # Only what changes the running app. Infra/docs merges to main must not
+    # trigger a prod deploy (Terraform has its own workflows).
+    paths:
+      - "app/**"
+      - "deploy/charts/sunshine-app/**"
+      - ".github/workflows/deliver.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy to
+        type: choice
+        options: [dev, staging, prod]
+        required: true
+      sha:
+        description: Commit to deploy (default - the branch you run this on). Use an older SHA to roll back.
+        type: string
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: deliver-${{ github.ref }}
+  cancel-in-progress: false # never abandon a half-moved deployment
+
+env:
+  IMAGE: sunshine-app
+  TRIVY_VERSION: v0.69.3 # last release before the compromised v0.69.4
+
+jobs:
+  target:
+    name: target environment
+    runs-on: ubuntu-24.04
+    outputs:
+      env: ${{ steps.t.outputs.env }}
+      sha: ${{ steps.t.outputs.sha }}
+      url: ${{ steps.t.outputs.url }}
+    steps:
+      - id: t
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_ENV: ${{ inputs.environment }}
+          INPUT_SHA: ${{ inputs.sha }}
+          PROD_URL: ${{ vars.PROD_APP_URL }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            ENV="$INPUT_ENV"; SHA="${INPUT_SHA:-$GITHUB_SHA}"
+          else
+            case "$GITHUB_REF" in
+              refs/heads/develop)    ENV=dev ;;
+              refs/heads/release/*)  ENV=staging ;;
+              refs/heads/main)       ENV=prod ;;
+              *) echo "::error::no environment for $GITHUB_REF"; exit 1 ;;
+            esac
+            SHA="$GITHUB_SHA"
+          fi
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be a full 40-character commit SHA"; exit 1; }
+          case "$ENV" in
+            dev)     URL=https://dev.simptechit.click ;;
+            staging) URL=https://staging.simptechit.click ;;
+            prod)    URL="$PROD_URL" ;;
+          esac
+          { echo "env=$ENV"; echo "sha=$SHA"; echo "url=$URL"; } >> "$GITHUB_OUTPUT"
+          echo "### Deliver \`${SHA:0:7}\` -> **$ENV**" >> "$GITHUB_STEP_SUMMARY"
+
+  image:
+    name: image (build once)
+    needs: target
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write # ECR push role
+    outputs:
+      tree: ${{ steps.find.outputs.tree }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.target.outputs.sha }}
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+          role-session-name: gha-deliver-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: find an image for this app/ tree
+        id: find
+        run: |
+          TREE=$(git rev-parse HEAD:app)
+          echo "tree=$TREE" >> "$GITHUB_OUTPUT"
+          if aws ecr describe-images --repository-name "$IMAGE" --image-ids imageTag="app-$TREE" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "- app/ tree \`${TREE:0:12}\`: image already built - **reused** (same bytes as before)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "- app/ tree \`${TREE:0:12}\`: new code - building" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ---------- only when app/ changed: build -> scan -> test -> push ----------
+      - if: steps.find.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@v3
+
+      - name: build
+        if: steps.find.outputs.exists == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          load: true
+          push: false
+          provenance: false
+          tags: ${{ env.IMAGE }}:app-${{ steps.find.outputs.tree }}
+          build-args: APP_VERSION=app-${{ steps.find.outputs.tree }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: scan (fail on fixable HIGH/CRITICAL)
+        if: steps.find.outputs.exists == 'false'
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          image-ref: ${{ env.IMAGE }}:app-${{ steps.find.outputs.tree }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: smoke test the container
+        if: steps.find.outputs.exists == 'false'
+        env:
+          LOCAL: ${{ env.IMAGE }}:app-${{ steps.find.outputs.tree }}
+        run: |
+          docker run -d --name app -p 8080:8080 --read-only --user 10001 "$LOCAL"
+          for _ in $(seq 1 20); do curl -fsS localhost:8080/healthz && break; sleep 1; done
+          curl -fsS localhost:8080/healthz | grep -q '"status":"ok"'
+          docker rm -f app
+
+      - name: push
+        if: steps.find.outputs.exists == 'false'
+        env:
+          REMOTE: ${{ steps.ecr.outputs.registry }}/${{ env.IMAGE }}:app-${{ steps.find.outputs.tree }}
+          LOCAL: ${{ env.IMAGE }}:app-${{ steps.find.outputs.tree }}
+        run: |
+          docker tag "$LOCAL" "$REMOTE"
+          docker push "$REMOTE"
+
+      # ---------- always: tag the image with this commit (what Argo CD asks for) ----------
+      - name: tag image with the commit SHA
+        env:
+          TREE_TAG: app-${{ steps.find.outputs.tree }}
+          SHA: ${{ needs.target.outputs.sha }}
+        run: |
+          if aws ecr describe-images --repository-name "$IMAGE" --image-ids imageTag="$SHA" > /dev/null 2>&1; then
+            echo "tag $SHA exists"
+          else
+            # Same manifest, new tag: no layers move, identical digest. The digest is
+            # a hash of the manifest BYTES - keep them exact: $(...) drops the
+            # newline --output text appends (a file would keep it -> new digest).
+            MANIFEST=$(aws ecr batch-get-image --repository-name "$IMAGE" --image-ids imageTag="$TREE_TAG" \
+              --query 'images[0].imageManifest' --output text)
+            MEDIA=$(aws ecr batch-get-image --repository-name "$IMAGE" --image-ids imageTag="$TREE_TAG" \
+              --query 'images[0].imageManifestMediaType' --output text)
+            aws ecr put-image --repository-name "$IMAGE" --image-tag "$SHA" \
+              --image-manifest "$MANIFEST" --image-manifest-media-type "$MEDIA" > /dev/null
+          fi
+          TREE_DIGEST=$(aws ecr describe-images --repository-name "$IMAGE" --image-ids imageTag="$TREE_TAG" \
+            --query 'imageDetails[0].imageDigest' --output text)
+          DIGEST=$(aws ecr describe-images --repository-name "$IMAGE" --image-ids imageTag="$SHA" \
+            --query 'imageDetails[0].imageDigest' --output text)
+          if [ "$DIGEST" != "$TREE_DIGEST" ]; then
+            echo "::error::$IMAGE:$SHA ($DIGEST) is not the image built for this app/ tree ($TREE_DIGEST)"
+            exit 1
+          fi
+          echo "- image: \`$IMAGE:${SHA:0:7}\` = \`$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: deploy (${{ needs.target.outputs.env }})
+    needs: [target, image]
+    runs-on: ubuntu-24.04
+    # dev / staging / prod: GitHub environments. Give "prod" required reviewers
+    # (Settings > Environments) and every prod deploy waits for an approval.
+    environment:
+      name: ${{ needs.target.outputs.env }}
+      url: ${{ needs.target.outputs.url }}
+    permissions:
+      contents: write # move the env/<name> pointer branch
+    env:
+      ENV: ${{ needs.target.outputs.env }}
+      SHA: ${{ needs.target.outputs.sha }}
+      URL: ${{ needs.target.outputs.url }}
+      TREE: ${{ needs.image.outputs.tree }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # needs the pointer branches
+
+      - name: prod only runs what staging tested
+        if: needs.target.outputs.env == 'prod'
+        env:
+          PROD_ENABLED: ${{ vars.PROD_ENABLED }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$PROD_ENABLED" != "true" ]; then
+            echo "::notice::prod account not set up yet (repository variable PROD_ENABLED) - skipping"
+            echo "SKIP=true" >> "$GITHUB_ENV"; exit 0
+          fi
+          # Code AND chart must be exactly what env/staging runs (git tree hashes).
+          for path in app deploy/charts/sunshine-app; do
+            HERE=$(git rev-parse "$SHA:$path")
+            THERE=$(git rev-parse "origin/env/staging:$path" 2> /dev/null || echo none)
+            if [ "$EVENT" = "push" ] && [ "$HERE" != "$THERE" ]; then
+              echo "::error::$path on main (${HERE:0:12}) differs from what staging runs (${THERE:0:12}) - release through a release/* branch first"
+              exit 1
+            fi
+          done
+
+      - name: move env/${{ needs.target.outputs.env }} -> ${{ needs.target.outputs.sha }}
+        if: env.SKIP != 'true'
+        run: |
+          PREVIOUS=$(git rev-parse "origin/env/$ENV" 2> /dev/null || echo none)
+          # Force: a rollback moves the pointer backwards. Pushes made with the
+          # workflow token never trigger other workflows, so no loops.
+          git push --force origin "$SHA:refs/heads/env/$ENV"
+          {
+            echo "- env/$ENV: \`${PREVIOUS:0:7}\` -> \`${SHA:0:7}\`"
+            echo "- rollback: Actions > deliver > Run workflow, environment \`$ENV\`, sha \`$PREVIOUS\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: wait until ${{ needs.target.outputs.env }} runs it
+        if: env.SKIP != 'true' && needs.target.outputs.url != ''
+        run: |
+          # Argo CD polls Git about every minute, then rolls the pods (readiness
+          # gates, maxUnavailable 0). /healthz is public and reports the revision.
+          for i in $(seq 1 60); do
+            BODY=$(curl -fsS --max-time 5 "$URL/healthz" || true)
+            if grep -q "\"revision\":\"$SHA\"" <<< "$BODY"; then
+              echo "live after $((i * 10)) s: $BODY"
+              echo "- live on $URL after ~$((i * 10)) s" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$URL did not report revision $SHA within 10 min - check Argo CD (is the lab up?)"
+          exit 1
