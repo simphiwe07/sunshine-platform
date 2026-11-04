@@ -13,7 +13,7 @@ data "aws_partition" "current" {}
 
 data "aws_cognito_user_pools" "lab" {
   count = var.enable_auth ? 1 : 0
-  name  = "${var.project}-${var.environment}"
+  name  = var.cognito_pool_name # one pool (foundation) signs in every environment
 }
 
 locals {

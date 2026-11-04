@@ -2,9 +2,9 @@
 #
 #   push to develop       -> dev      (non-prod cluster, namespace sunshine-dev)
 #   push to release/**    -> staging  (non-prod cluster, namespace sunshine-staging)
-#   push to main          -> prod     (prod account, after approval in the GitHub
-#                                      environment "prod"; only the app/ code that
-#                                      staging is running)
+#   push to main          -> prod     (prod cluster sunshine-prod, after approval in
+#                                      the GitHub environment "prod"; only the code
+#                                      and chart staging is running)
 #
 # Build once, promote the same bytes: an image is keyed by the git tree hash of
 # app/ (tag app-<tree>). A commit whose app/ already has an image REUSES it and
@@ -61,7 +61,6 @@ jobs:
           EVENT: ${{ github.event_name }}
           INPUT_ENV: ${{ inputs.environment }}
           INPUT_SHA: ${{ inputs.sha }}
-          PROD_URL: ${{ vars.PROD_APP_URL }}
         run: |
           if [ "$EVENT" = "workflow_dispatch" ]; then
             ENV="$INPUT_ENV"; SHA="${INPUT_SHA:-$GITHUB_SHA}"
@@ -78,7 +77,7 @@ jobs:
           case "$ENV" in
             dev)     URL=https://dev.simptechit.click ;;
             staging) URL=https://staging.simptechit.click ;;
-            prod)    URL="$PROD_URL" ;;
+            prod)    URL=https://prod.simptechit.click ;;
           esac
           { echo "env=$ENV"; echo "sha=$SHA"; echo "url=$URL"; } >> "$GITHUB_OUTPUT"
           echo "### Deliver \`${SHA:0:7}\` -> **$ENV**" >> "$GITHUB_STEP_SUMMARY"
@@ -219,14 +218,10 @@ jobs:
       - name: prod only runs what staging tested
         if: needs.target.outputs.env == 'prod'
         env:
-          PROD_ENABLED: ${{ vars.PROD_ENABLED }}
           EVENT: ${{ github.event_name }}
         run: |
-          if [ "$PROD_ENABLED" != "true" ]; then
-            echo "::notice::prod account not set up yet (repository variable PROD_ENABLED) - skipping"
-            echo "SKIP=true" >> "$GITHUB_ENV"; exit 0
-          fi
           # Code AND chart must be exactly what env/staging runs (git tree hashes).
+          # Manual runs (rollbacks) skip this: they pick an earlier, already-released commit.
           for path in app deploy/charts/sunshine-app; do
             HERE=$(git rev-parse "$SHA:$path")
             THERE=$(git rev-parse "origin/env/staging:$path" 2> /dev/null || echo none)
@@ -237,7 +232,6 @@ jobs:
           done
 
       - name: move env/${{ needs.target.outputs.env }} -> ${{ needs.target.outputs.sha }}
-        if: env.SKIP != 'true'
         run: |
           PREVIOUS=$(git rev-parse "origin/env/$ENV" 2> /dev/null || echo none)
           # Force: a rollback moves the pointer backwards. Pushes made with the
@@ -249,8 +243,16 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: wait until ${{ needs.target.outputs.env }} runs it
-        if: env.SKIP != 'true' && needs.target.outputs.url != ''
         run: |
+          # Cluster down (nightly lab-down / prod-down)? Then there is nothing to
+          # wait for: the pointer has moved, and Argo CD deploys it at the next
+          # lab-up / prod-up. ExternalDNS removes the record when the app goes, so
+          # "can't resolve / no answer" = down.
+          if ! curl -sS --max-time 10 -o /dev/null "$URL/healthz" 2> /dev/null; then
+            echo "::notice::$URL is not up - env/$ENV moved; Argo CD deploys it when the cluster is next started"
+            echo "- $URL not up: deploys at the next cluster start" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           # Argo CD polls Git about every minute, then rolls the pods (readiness
           # gates, maxUnavailable 0). /healthz is public and reports the revision.
           for i in $(seq 1 60); do
@@ -262,5 +264,5 @@ jobs:
             fi
             sleep 10
           done
-          echo "::error::$URL did not report revision $SHA within 10 min - check Argo CD (is the lab up?)"
+          echo "::error::$URL did not report revision $SHA within 10 min - check the Argo CD Application"
           exit 1

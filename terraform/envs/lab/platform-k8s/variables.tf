@@ -13,6 +13,18 @@ variable "environment" {
   default = "lab"
 }
 
+variable "platform_state_key" {
+  description = "State of the platform stack this cluster belongs to (lab = non-prod cluster, prod = prod cluster)."
+  type        = string
+  default     = "lab/platform.tfstate"
+}
+
+variable "cognito_pool_name" {
+  description = "Cognito user pool (foundation stack) the ALB signs users in with."
+  type        = string
+  default     = "sunshine-lab"
+}
+
 variable "state_bucket" {
   description = "Terraform state bucket (read the platform stack's outputs). CI sets TF_VAR_state_bucket."
   type        = string

@@ -5,7 +5,7 @@ data "terraform_remote_state" "platform" {
 
   config = {
     bucket = var.state_bucket
-    key    = "lab/platform.tfstate"
+    key    = var.platform_state_key # lab/platform.tfstate, or prod/platform.tfstate
     region = var.region
   }
 }

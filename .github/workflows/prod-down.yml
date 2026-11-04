@@ -1,0 +1,73 @@
+# Stop the PROD cluster. Also nightly at 20:15 SAST (18:15 UTC), after lab-down,
+# so a forgotten prod cluster never burns credits overnight. Same order as
+# lab-down: Kubernetes-made load balancers first, then the k8s stack, then the
+# platform (EKS, RDS, VPC).
+name: prod-down
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 18 * * *"
+
+permissions: {}
+
+env:
+  CLUSTER: sunshine-prod
+
+jobs:
+  k8s-cleanup:
+    name: delete Kubernetes-managed load balancers
+    runs-on: ubuntu-24.04
+    environment: lab # the Terraform apply role lives here (same account)
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          role-session-name: gha-prod-cleanup-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: delete Argo CD apps, Ingresses, LoadBalancer Services and wait
+        run: |
+          if ! aws eks describe-cluster --name "$CLUSTER" > /dev/null 2>&1; then
+            echo "::notice::no $CLUSTER cluster - nothing to clean up"; exit 0
+          fi
+          aws eks update-kubeconfig --name "$CLUSTER"
+          # Argo CD would re-create what we delete: remove its Applications first;
+          # their finalizer makes Argo CD delete the app (Ingress -> ALB).
+          if kubectl get crd applications.argoproj.io > /dev/null 2>&1; then
+            kubectl delete applications.argoproj.io --all -n argocd --wait --timeout=10m
+          fi
+          kubectl delete ingress --all --all-namespaces --wait --timeout=10m
+          kubectl get svc -A -o json \
+            | jq -r '.items[] | select(.spec.type=="LoadBalancer") | "\(.metadata.namespace) \(.metadata.name)"' \
+            | while read -r ns name; do kubectl delete svc -n "$ns" "$name" --wait --timeout=10m; done
+          sleep 90 # ExternalDNS (sync policy, 1 min interval) removes prod's DNS records
+
+  destroy-k8s:
+    needs: k8s-cleanup
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      stack: terraform/envs/lab/platform-k8s
+      command: destroy
+      var_file: prod.tfvars
+      state_key: prod/platform-k8s.tfstate
+      skip_if_no_cluster: sunshine-prod
+
+  destroy:
+    needs: destroy-k8s
+    if: ${{ !cancelled() }} # the cluster and nodes cost money: always try
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      stack: terraform/envs/lab/platform
+      command: destroy
+      var_file: prod.tfvars
+      state_key: prod/platform.tfstate

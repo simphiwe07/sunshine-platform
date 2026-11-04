@@ -100,7 +100,7 @@ Debugging a task: set `enable_ecs_exec = true` (this also makes the root filesys
 - `platform` creates the cluster and everything AWS-side; `platform-k8s` installs the controllers (Helm) and the app chart (`deploy/charts/sunshine-app`).
 - App: `https://eks.<domain>` (ALB via Ingress) and `https://nlb.<domain>` (NLB via Service type LoadBalancer).
 - kubectl: `aws eks update-kubeconfig --name sunshine-lab --region eu-west-1 --profile sunshine`
-- **Environments (GitOps):** `develop` → dev, `release/*` → staging (namespaces on this cluster), `main` → prod (own account). CI builds once, then moves `env/<name>` pointer branches that Argo CD follows. See [docs/runbooks/gitops.md](docs/runbooks/gitops.md).
+- **Environments (GitOps):** `develop` → dev, `release/*` → staging (namespaces on the non-prod cluster), `main` → prod (cluster `sunshine-prod`: **prod-up** / **prod-down**). CI builds once, then moves `env/<name>` pointer branches that Argo CD follows. See [docs/runbooks/gitops.md](docs/runbooks/gitops.md).
 - Sign-in: the app requires a Cognito login (except `/healthz`, `/readyz`); least-privilege kubectl personas. See [docs/runbooks/identity.md](docs/runbooks/identity.md).
 - **lab-down** deletes the Kubernetes-made load balancers first, then the k8s stack, then the platform.
 - Upgrades: [docs/runbooks/eks-upgrade.md](docs/runbooks/eks-upgrade.md).
@@ -123,5 +123,5 @@ Debugging a task: set `enable_ecs_exec = true` (this also makes the root filesys
 - [x] 5b. Observability + autoscaling: kube-prometheus-stack (Grafana dashboards as code), app RED metrics, Cluster Autoscaler, k6 demand drill - [runbook](docs/runbooks/scaling-drill.md)
 - [x] 6. Identity: Cognito sign-in at the ALB (TOTP MFA, verified in the app), viewer/developer/admin personas: IAM role → EKS access entry → Kubernetes RBAC - [runbook](docs/runbooks/identity.md)
 - [x] 8. GitOps: Argo CD (pull-based deploys, self-heal, prune, AppProject fence) - [runbook](docs/runbooks/gitops.md)
-- [ ] 9. Environments: dev + staging namespaces (non-prod cluster), branch-driven delivery with build-once promotion (done); prod cluster in a separate AWS account (next)
+- [x] 9. Environments: dev + staging namespaces (non-prod cluster), separate prod cluster (own VPC/DB/Argo CD), branch-driven delivery with build-once promotion and an approval gate for prod - [runbook](docs/runbooks/gitops.md)
 - [ ] 7. Hardening: **WAF** on the ALB (managed rules, rate limit, geo allowlist, logs) - [runbook](docs/runbooks/waf.md); image signing (designed, not deployed); alerting + runbooks

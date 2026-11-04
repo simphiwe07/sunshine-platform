@@ -50,5 +50,5 @@ variable "auth_domain_prefix" {
 variable "auth_app_hostnames" {
   description = "Subdomains whose ALB may use the pool (callback https://<host>.<domain>/oauth2/idpresponse) - one per environment."
   type        = list(string)
-  default     = ["dev", "staging"]
+  default     = ["dev", "staging", "prod"]
 }
