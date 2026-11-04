@@ -30,7 +30,7 @@ resource "helm_release" "argocd" {
   timeout          = 600
   atomic           = true
 
-  values = [yamlencode({
+  values = concat([yamlencode({
     configs = {
       cm = {
         # Check Git every ~1 min instead of 3 (lab feedback). Production: a
@@ -42,7 +42,7 @@ resource "helm_release" "argocd" {
     # No SSO (Dex) or notifications in the lab: admin via port-forward only.
     dex           = { enabled = false }
     notifications = { enabled = false }
-  })]
+  })], local.admin_ui_enabled ? [yamlencode(local.argocd_admin_ui_values)] : []) # admin_ui.tf
 
   depends_on = [helm_release.lb_controller]
 }

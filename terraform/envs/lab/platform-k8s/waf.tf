@@ -117,6 +117,21 @@ resource "aws_wafv2_web_acl" "app" {
         managed_rule_group_statement {
           vendor_name = "AWS"
           name        = rule.value
+
+          # Tuning: count instead of block for single rules that false-positive.
+          # SizeRestrictions_BODY (> 8 KB): Grafana's dashboard queries are large
+          # JSON POSTs; the app itself takes no request bodies.
+          dynamic "rule_action_override" {
+            for_each = rule.value == "AWSManagedRulesCommonRuleSet" ? ["SizeRestrictions_BODY"] : []
+
+            content {
+              name = rule_action_override.value
+
+              action_to_use {
+                count {}
+              }
+            }
+          }
         }
       }
 

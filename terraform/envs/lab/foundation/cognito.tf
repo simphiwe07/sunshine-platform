@@ -104,3 +104,44 @@ resource "aws_cognito_user_pool_client" "alb" {
     refresh_token = "hours"
   }
 }
+
+# ---------- admin UIs: Argo CD and Grafana sign users in themselves ----------
+# Behind the ALB's own Cognito sign-in (so anonymous traffic never reaches
+# them), each tool runs its own OIDC login against the same pool - silent,
+# because the Cognito session already exists - and reads "cognito:groups" from
+# the ID token to decide the user's role (admin / developer / viewer).
+
+locals {
+  oidc_clients = {
+    argocd  = [for h in var.argocd_hostnames : "https://${h}.${var.domain_name}/auth/callback"]
+    grafana = [for h in var.grafana_hostnames : "https://${h}.${var.domain_name}/login/generic_oauth"]
+  }
+}
+
+resource "aws_cognito_user_pool_client" "admin_ui" {
+  for_each = var.enable_cognito ? local.oidc_clients : {}
+
+  name            = each.key
+  user_pool_id    = aws_cognito_user_pool.lab[0].id
+  generate_secret = true # confidential client; platform-k8s hands the secret to the tool
+
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  supported_identity_providers         = ["COGNITO"]
+  callback_urls                        = each.value
+
+  explicit_auth_flows           = ["ALLOW_REFRESH_TOKEN_AUTH"]
+  prevent_user_existence_errors = "ENABLED"
+  enable_token_revocation       = true
+
+  access_token_validity  = 60
+  id_token_validity      = 60
+  refresh_token_validity = 12
+
+  token_validity_units {
+    access_token  = "minutes"
+    id_token      = "minutes"
+    refresh_token = "hours"
+  }
+}
