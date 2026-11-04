@@ -92,18 +92,18 @@ jobs:
     outputs:
       tree: ${{ steps.find.outputs.tree }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ needs.target.outputs.sha }}
 
-      - uses: aws-actions/configure-aws-credentials@v6
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
           role-session-name: gha-deliver-${{ github.run_id }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
       - name: find an image for this app/ tree
         id: find
@@ -120,11 +120,11 @@ jobs:
 
       # ---------- only when app/ changed: build -> scan -> test -> push ----------
       - if: steps.find.outputs.exists == 'false'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: build
         if: steps.find.outputs.exists == 'false'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: app
           load: true
@@ -137,7 +137,7 @@ jobs:
 
       - name: scan (fail on fixable HIGH/CRITICAL)
         if: steps.find.outputs.exists == 'false'
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
           version: ${{ env.TRIVY_VERSION }}
           image-ref: ${{ env.IMAGE }}:app-${{ steps.find.outputs.tree }}
@@ -211,7 +211,7 @@ jobs:
       URL: ${{ needs.target.outputs.url }}
       TREE: ${{ needs.image.outputs.tree }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0 # needs the pointer branches
 
