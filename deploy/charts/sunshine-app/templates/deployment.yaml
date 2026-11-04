@@ -50,7 +50,13 @@ spec:
           # Either a full reference (image), or repository + tag, where Argo CD
           # sets imageTag to the commit it deploys ($ARGOCD_APP_REVISION). ECR
           # tags are immutable, so a commit tag always means the same bytes.
-          image: {{ .Values.image | default (printf "%s:%s" (required "imageRepository (or image) is required" .Values.imageRepository) (required "imageTag (or image) is required" .Values.imageTag)) }}
+          # if/else, not `default`: template functions evaluate all their arguments
+          # first, so `required` inside a default would fail even when image is set.
+          {{- if .Values.image }}
+          image: {{ .Values.image }}
+          {{- else }}
+          image: "{{ required "imageRepository (or image) is required" .Values.imageRepository }}:{{ required "imageTag (or image) is required" .Values.imageTag }}"
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.containerPort }}

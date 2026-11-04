@@ -1,5 +1,7 @@
 # Dummy values for CI lint/render only (real values come from platform-k8s).
-image: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/sunshine-app@sha256:0000000000000000000000000000000000000000000000000000000000000000
+# The way Argo CD deploys: repository + tag (tag = the commit, $ARGOCD_APP_REVISION)
+imageRepository: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/sunshine-app
+imageTag: 0123456789abcdef0123456789abcdef01234567
 bucket: example-bucket
 metrics:
   enabled: true
