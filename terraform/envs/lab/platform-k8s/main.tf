@@ -220,7 +220,7 @@ resource "helm_release" "kube_prometheus_stack" {
   timeout    = 900
   atomic     = true
 
-  values = [yamlencode({
+  values = concat([yamlencode({
     # EKS runs these control-plane components for us and doesn't expose their
     # metrics endpoints - scraping them would only produce "target down".
     kubeControllerManager = { enabled = false }
@@ -253,9 +253,12 @@ resource "helm_release" "kube_prometheus_stack" {
       # so the app ships its own dashboard.
       sidecar = { dashboards = { searchNamespace = "ALL" } }
     }
-  })]
+  })], local.admin_ui_enabled ? [yamlencode(local.grafana_admin_ui_values)] : []) # admin_ui.tf
 
-  depends_on = [helm_release.lb_controller]
+  depends_on = [
+    helm_release.lb_controller,
+    kubernetes_secret_v1.grafana_oidc, # Grafana's pod reads its OIDC client secret at start
+  ]
 }
 
 # ---------- the app ----------

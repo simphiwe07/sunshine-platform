@@ -150,3 +150,21 @@ variable "github_repository" {
   type        = string
   default     = "simphiwe07/sunshine-platform"
 }
+
+variable "enable_admin_ui" {
+  description = "Argo CD + Grafana on https://<host>.<domain>, behind the ALB's Cognito sign-in and their own Cognito OIDC login (needs enable_auth)."
+  type        = bool
+  default     = true
+}
+
+variable "admin_ui_hosts" {
+  description = "Subdomains of this cluster's admin UIs (must be in the foundation stack's Cognito callback lists)."
+  type        = object({ argocd = string, grafana = string })
+  default     = { argocd = "argocd", grafana = "grafana" }
+}
+
+variable "argocd_developer_can_sync" {
+  description = "Cognito group 'developer' may sync apps in Argo CD (non-prod); false = read-only (prod)."
+  type        = bool
+  default     = true
+}

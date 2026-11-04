@@ -100,6 +100,7 @@ Debugging a task: set `enable_ecs_exec = true` (this also makes the root filesys
 - `platform` creates the cluster and everything AWS-side; `platform-k8s` installs the controllers (Helm) and the app chart (`deploy/charts/sunshine-app`).
 - App: `https://eks.<domain>` (ALB via Ingress) and `https://nlb.<domain>` (NLB via Service type LoadBalancer).
 - kubectl: `aws eks update-kubeconfig --name sunshine-lab --region eu-west-1 --profile sunshine`
+- **Admin UIs:** Argo CD and Grafana per cluster at `argocd(-prod)` / `grafana(-prod)`.simptechit.click, behind the ALB's Cognito sign-in plus their own Cognito OIDC (roles from Cognito groups). See [docs/runbooks/admin-uis.md](docs/runbooks/admin-uis.md).
 - **Environments (GitOps):** `develop` → dev, `release/*` → staging (namespaces on the non-prod cluster), `main` → prod (cluster `sunshine-prod`: **prod-up** / **prod-down**). CI builds once, then moves `env/<name>` pointer branches that Argo CD follows. See [docs/runbooks/gitops.md](docs/runbooks/gitops.md).
 - Sign-in: the app requires a Cognito login (except `/healthz`, `/readyz`); least-privilege kubectl personas. See [docs/runbooks/identity.md](docs/runbooks/identity.md).
 - **lab-down** deletes the Kubernetes-made load balancers first, then the k8s stack, then the platform.

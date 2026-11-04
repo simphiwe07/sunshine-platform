@@ -9,3 +9,7 @@ platform_state_key = "prod/platform.tfstate"
 app_envs = {
   prod = { hostname = "prod", branch = "env/prod", dashboard = true, developer_access = false }
 }
+
+# Admin UIs of the prod cluster; developers may look at Argo CD, not sync.
+admin_ui_hosts            = { argocd = "argocd-prod", grafana = "grafana-prod" }
+argocd_developer_can_sync = false

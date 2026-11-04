@@ -50,5 +50,17 @@ variable "auth_domain_prefix" {
 variable "auth_app_hostnames" {
   description = "Subdomains whose ALB may use the pool (callback https://<host>.<domain>/oauth2/idpresponse) - one per environment."
   type        = list(string)
-  default     = ["dev", "staging", "prod"]
+  default     = ["dev", "staging", "prod", "argocd", "grafana", "argocd-prod", "grafana-prod"]
+}
+
+variable "argocd_hostnames" {
+  description = "Argo CD UIs (one per cluster) that sign users in with Cognito (OIDC)."
+  type        = list(string)
+  default     = ["argocd", "argocd-prod"]
+}
+
+variable "grafana_hostnames" {
+  description = "Grafana UIs (one per cluster) that sign users in with Cognito (OIDC)."
+  type        = list(string)
+  default     = ["grafana", "grafana-prod"]
 }

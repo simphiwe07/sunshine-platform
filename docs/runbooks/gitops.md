@@ -96,10 +96,7 @@ Emergency: pause automation on one Application, fix, commit the fix, then switch
 
 ## Open Argo CD
 
-```bash
-kubectl -n argocd port-forward svc/argocd-server 8080:443        # https://localhost:8080, user admin
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
-```
+https://argocd.simptechit.click (non-prod) and https://argocd-prod.simptechit.click (prod), behind Cognito sign-in. See [admin-uis.md](admin-uis.md) for roles and break-glass access.
 
 ## If something breaks
 
