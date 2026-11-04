@@ -224,7 +224,7 @@ jobs:
           # Manual runs (rollbacks) skip this: they pick an earlier, already-released commit.
           for path in app deploy/charts/sunshine-app; do
             HERE=$(git rev-parse "$SHA:$path")
-            THERE=$(git rev-parse "origin/env/staging:$path" 2> /dev/null || echo none)
+            THERE=$(git rev-parse --verify -q "origin/env/staging:$path" || echo none)
             if [ "$EVENT" = "push" ] && [ "$HERE" != "$THERE" ]; then
               echo "::error::$path on main (${HERE:0:12}) differs from what staging runs (${THERE:0:12}) - release through a release/* branch first"
               exit 1
@@ -233,7 +233,7 @@ jobs:
 
       - name: move env/${{ needs.target.outputs.env }} -> ${{ needs.target.outputs.sha }}
         run: |
-          PREVIOUS=$(git rev-parse "origin/env/$ENV" 2> /dev/null || echo none)
+          PREVIOUS=$(git rev-parse --verify -q "origin/env/$ENV" || echo none)
           # Force: a rollback moves the pointer backwards. Pushes made with the
           # workflow token never trigger other workflows, so no loops.
           git push --force origin "$SHA:refs/heads/env/$ENV"
