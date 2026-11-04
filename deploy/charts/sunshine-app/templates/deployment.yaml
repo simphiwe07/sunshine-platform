@@ -47,13 +47,24 @@ spec:
               {{- include "app.selector" . | nindent 14 }}
       containers:
         - name: app
-          image: {{ required "image is required" .Values.image }}
+          # Either a full reference (image), or repository + tag, where Argo CD
+          # sets imageTag to the commit it deploys ($ARGOCD_APP_REVISION). ECR
+          # tags are immutable, so a commit tag always means the same bytes.
+          # if/else, not `default`: template functions evaluate all their arguments
+          # first, so `required` inside a default would fail even when image is set.
+          {{- if .Values.image }}
+          image: {{ .Values.image }}
+          {{- else }}
+          image: "{{ required "imageRepository (or image) is required" .Values.imageRepository }}:{{ required "imageTag (or image) is required" .Values.imageTag }}"
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.containerPort }}
           env:
             - name: AWS_REGION
               value: {{ .Values.region | quote }}
+            - name: DEPLOY_REVISION
+              value: {{ .Values.imageTag | default "" | quote }}
             - name: APP_BUCKET
               value: {{ .Values.bucket | quote }}
             {{- if .Values.auth.enabled }}

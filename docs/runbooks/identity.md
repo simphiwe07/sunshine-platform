@@ -47,9 +47,9 @@ Cognito emails a temporary password (valid 3 days). First sign-in: new password 
 ## Test app sign-in
 
 ```bash
-curl -sI https://eks.simptechit.click/ | grep -i '^location'   # -> https://simptechit-lab.auth.eu-west-1.amazoncognito.com/oauth2/authorize?...
-curl -s  https://eks.simptechit.click/healthz                   # public: {"status":"ok","version":"<sha>"}
-curl -s -o /dev/null -w '%{http_code}\n' https://eks.simptechit.click/metrics   # 404 (blocked at the ALB)
+curl -sI https://dev.simptechit.click/ | grep -i '^location'   # -> https://simptechit-lab.auth.eu-west-1.amazoncognito.com/oauth2/authorize?...
+curl -s  https://dev.simptechit.click/healthz                   # public: {"status":"ok","version":"<sha>"}
+curl -s -o /dev/null -w '%{http_code}\n' https://dev.simptechit.click/metrics   # 404 (blocked at the ALB)
 ```
 
 In a browser (private window per user):
@@ -64,7 +64,7 @@ In a browser (private window per user):
 Optional, to prove the app does not trust the headers blindly - from inside the cluster (NetworkPolicy blocks other pods, so port-forward as admin):
 
 ```bash
-kubectl -n sunshine port-forward deploy/sunshine-app 8080:8080 &
+kubectl -n sunshine-dev port-forward deploy/sunshine-app 8080:8080 &
 curl -s localhost:8080/me -H 'x-amzn-oidc-data: e30.e30.e30' -H 'x-amzn-oidc-accesstoken: x'   # 401
 ```
 
@@ -110,9 +110,9 @@ Expected (`kubectl --context sunshine-<persona> auth can-i ...`):
 Then for real:
 
 ```bash
-kubectl --context sunshine-viewer    -n sunshine rollout restart deploy/sunshine-app   # Forbidden
-kubectl --context sunshine-developer -n sunshine rollout restart deploy/sunshine-app   # restarted
-kubectl --context sunshine-developer -n sunshine get secret sunshine-db                # Forbidden
+kubectl --context sunshine-viewer    -n sunshine-dev rollout restart deploy/sunshine-app   # Forbidden
+kubectl --context sunshine-developer -n sunshine-dev rollout restart deploy/sunshine-app   # restarted
+kubectl --context sunshine-developer -n sunshine-dev get secret sunshine-db                # Forbidden
 ```
 
 Audit trail: CloudWatch Logs `/aws/eks/sunshine-lab/cluster`, Logs Insights:

@@ -19,6 +19,16 @@ on:
         required: false
         type: string
         default: ""
+      var_file:
+        description: Extra -var-file in the stack directory, e.g. prod.tfvars (the prod cluster)
+        required: false
+        type: string
+        default: ""
+      state_key:
+        description: State object to use instead of the stack's default, e.g. prod/platform.tfstate
+        required: false
+        type: string
+        default: ""
     outputs:
       app_url:
         description: Public URL of the app (platform stack only, empty otherwise)
@@ -86,13 +96,15 @@ jobs:
       app_url: ${{ steps.tfout.outputs.app_url }}
       app_version: ${{ steps.tfout.outputs.app_version }}
     concurrency:
-      group: tf-${{ inputs.stack }}
+      group: tf-${{ inputs.stack }}-${{ inputs.state_key }}
       cancel-in-progress: false
     permissions:
       id-token: write
       contents: read
     env:
       COMMAND: ${{ inputs.command }}
+      VAR_FILE: ${{ inputs.var_file }}
+      STATE_KEY: ${{ inputs.state_key }}
     defaults:
       run:
         shell: bash
@@ -128,15 +140,15 @@ jobs:
 
       - name: init
         if: steps.pre.outputs.skip != 'true'
-        run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+        run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" ${STATE_KEY:+-backend-config="key=$STATE_KEY"}
 
       - name: plan
         if: steps.pre.outputs.skip != 'true'
         run: |
           if [ "$COMMAND" = "destroy" ]; then
-            terraform plan -destroy -lock-timeout=5m -out=tfplan
+            terraform plan -destroy -lock-timeout=5m ${VAR_FILE:+-var-file="$VAR_FILE"} -out=tfplan
           else
-            terraform plan -lock-timeout=5m -out=tfplan
+            terraform plan -lock-timeout=5m ${VAR_FILE:+-var-file="$VAR_FILE"} -out=tfplan
           fi
           {
             echo "### ${COMMAND}: \`${{ inputs.stack }}\`"

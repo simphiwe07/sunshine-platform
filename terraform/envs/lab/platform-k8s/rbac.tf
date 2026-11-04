@@ -4,6 +4,7 @@
 #   persona     IAM role                      Kubernetes groups         can
 #   viewer      sunshine-lab-eks-viewer       sunshine:viewers          read everything except Secrets
 #   developer   sunshine-lab-eks-developer    + sunshine:developers     + restart/roll back the app, delete its pods
+#                                                                       (dev + staging namespaces; not in prod)
 #   admin       AccountFullAccessRole         (EKS access policy)       cluster-admin
 #
 # Deliberately NOT for developers: Secrets (DB password), exec/port-forward
@@ -33,11 +34,14 @@ resource "kubernetes_cluster_role_binding_v1" "viewers" {
   }
 }
 
-# Day-2 operations on the app, in its namespace only.
+# Day-2 operations on the app, in the app namespaces where developers have
+# access (dev + staging; never prod - there only admins act).
 resource "kubernetes_role_v1" "developer" {
+  for_each = { for env, cfg in var.app_envs : env => cfg if cfg.developer_access }
+
   metadata {
     name      = "sunshine-developer"
-    namespace = kubernetes_namespace_v1.app.metadata[0].name
+    namespace = kubernetes_namespace_v1.app[each.key].metadata[0].name
   }
 
   # kubectl rollout restart / undo = patch the Deployment
@@ -56,15 +60,17 @@ resource "kubernetes_role_v1" "developer" {
 }
 
 resource "kubernetes_role_binding_v1" "developers" {
+  for_each = kubernetes_role_v1.developer
+
   metadata {
     name      = "sunshine-developers"
-    namespace = kubernetes_namespace_v1.app.metadata[0].name
+    namespace = each.value.metadata[0].namespace
   }
 
   role_ref {
     api_group = "rbac.authorization.k8s.io"
     kind      = "Role"
-    name      = kubernetes_role_v1.developer.metadata[0].name
+    name      = each.value.metadata[0].name
   }
 
   subject {

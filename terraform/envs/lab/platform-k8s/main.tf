@@ -5,7 +5,7 @@ data "terraform_remote_state" "platform" {
 
   config = {
     bucket = var.state_bucket
-    key    = "lab/platform.tfstate"
+    key    = var.platform_state_key # lab/platform.tfstate, or prod/platform.tfstate
     region = var.region
   }
 }
@@ -15,8 +15,8 @@ locals {
   cluster_name = local.platform.eks_cluster_name
   db_enabled   = try(local.platform.db_address, null) != null
 
-  app_host = "${var.app_hostname}.${var.domain_name}"
-  nlb_host = var.nlb_hostname == "" ? "" : "${var.nlb_hostname}.${var.domain_name}"
+  app_namespaces = { for env, cfg in var.app_envs : env => "${var.project}-${env}" }
+  app_hosts      = { for env, cfg in var.app_envs : env => "${cfg.hostname}.${var.domain_name}" }
 }
 
 data "aws_eks_cluster" "this" {
@@ -37,14 +37,12 @@ data "aws_acm_certificate" "wildcard" {
 }
 
 data "aws_ecr_repository" "app" {
-  name = "${var.project}-app"
+  count = var.image_repository == "" ? 1 : 0
+  name  = "${var.project}-app"
 }
 
-# The image Git says is deployed (values-lab.yaml) - for the app_version output
-# the post-deploy smoke test compares against.
-data "aws_ecr_image" "app" {
-  repository_name = data.aws_ecr_repository.app.name
-  image_digest    = split("@", local.gitops_values.image)[1]
+locals {
+  image_repository = var.image_repository != "" ? var.image_repository : data.aws_ecr_repository.app[0].repository_url
 }
 
 # ---------- controllers ----------
@@ -263,8 +261,10 @@ resource "helm_release" "kube_prometheus_stack" {
 # ---------- the app ----------
 
 resource "kubernetes_namespace_v1" "app" {
+  for_each = local.app_namespaces # one per environment: sunshine-dev, sunshine-staging (prod: own account)
+
   metadata {
-    name = "sunshine"
+    name = each.value
 
     # Pod Security Admission "restricted": the API server rejects pods that run
     # as root, allow privilege escalation, keep Linux capabilities, etc.
@@ -277,6 +277,7 @@ resource "kubernetes_namespace_v1" "app" {
       # wait for the load balancer, not just the kubelet - found in the 1.37
       # upgrade drill (20 x 502/504 while nodes were drained without it).
       "elbv2.k8s.aws/pod-readiness-gate-inject" = "enabled"
+      "sunshine/environment"                    = each.key
     }
   }
 }

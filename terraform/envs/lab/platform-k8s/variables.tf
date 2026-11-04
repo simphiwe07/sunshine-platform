@@ -13,6 +13,18 @@ variable "environment" {
   default = "lab"
 }
 
+variable "platform_state_key" {
+  description = "State of the platform stack this cluster belongs to (lab = non-prod cluster, prod = prod cluster)."
+  type        = string
+  default     = "lab/platform.tfstate"
+}
+
+variable "cognito_pool_name" {
+  description = "Cognito user pool (foundation stack) the ALB signs users in with."
+  type        = string
+  default     = "sunshine-lab"
+}
+
 variable "state_bucket" {
   description = "Terraform state bucket (read the platform stack's outputs). CI sets TF_VAR_state_bucket."
   type        = string
@@ -23,16 +35,18 @@ variable "domain_name" {
   default = "simptechit.click"
 }
 
-variable "app_hostname" {
-  description = "Subdomain for the app behind the ALB (Ingress)."
-  type        = string
-  default     = "eks"
-}
-
-variable "nlb_hostname" {
-  description = "Subdomain for the same app behind an NLB (Service type LoadBalancer). Empty = no NLB."
-  type        = string
-  default     = "nlb"
+variable "app_envs" {
+  description = "Environments on this cluster: one namespace (sunshine-<env>), hostname and Argo CD Application each. Argo CD follows the env's pointer branch, which only CI moves."
+  type = map(object({
+    hostname         = string                # <hostname>.<domain_name>
+    branch           = string                # pointer branch Argo CD deploys from
+    dashboard        = optional(bool, false) # Grafana dashboard (one env per cluster, or they collide)
+    developer_access = optional(bool, true)  # Kubernetes "developer" persona may restart pods here
+  }))
+  default = {
+    dev     = { hostname = "dev", branch = "env/dev", dashboard = true }
+    staging = { hostname = "staging", branch = "env/staging" }
+  }
 }
 
 # Chart versions are pinned: an upgrade is a reviewed PR, not a surprise.
@@ -125,10 +139,10 @@ variable "argocd_apps_chart_version" {
   default = "2.0.7"
 }
 
-variable "gitops_revision" {
-  description = "Git branch/tag/commit Argo CD deploys the app from."
+variable "image_repository" {
+  description = "Where the app image comes from. Empty = this account's ECR repo. The prod account sets the non-prod repo: images are built once, there, and pulled cross-account."
   type        = string
-  default     = "main"
+  default     = ""
 }
 
 variable "github_repository" {

@@ -1,8 +1,12 @@
 # Environment settings come from Terraform (on the Argo CD Application); the
-# image - the version - from values-lab.yaml in Git.
+# version is the commit the environment's pointer branch (env/<name>) is on.
 
-# Image by digest (repo@sha256:...) - exact scanned bytes, never a movable tag.
+# The image: either a full reference, or repository + tag. Argo CD sets imageTag
+# to the commit it deploys; CI tagged that commit's image before moving the
+# pointer branch, and ECR tags are immutable.
 image: ""
+imageRepository: ""
+imageTag: ""
 region: eu-west-1
 bucket: ""
 # Subnets the load balancers live in - the only sources allowed to reach the

@@ -13,7 +13,7 @@ data "aws_partition" "current" {}
 
 data "aws_cognito_user_pools" "lab" {
   count = var.enable_auth ? 1 : 0
-  name  = "${var.project}-${var.environment}"
+  name  = var.cognito_pool_name # one pool (foundation) signs in every environment
 }
 
 locals {
@@ -49,8 +49,13 @@ locals {
     # The ALB signing x-amzn-oidc-data must be OURS. LB controller names an
     # IngressGroup's ALB k8s-<group>-<hash>.
     signerPrefix = "arn:${data.aws_partition.current.partition}:elasticloadbalancing:${var.region}:${data.aws_caller_identity.current.account_id}:loadbalancer/app/k8s-sunshine-"
-    # ALB auth has no logout of its own: the app expires the ALB cookie, then
-    # sends the browser here to end the Cognito session too.
-    logoutUrl = var.enable_auth ? "https://${local.cognito_domain}/logout?client_id=${local.alb_client_id}&logout_uri=${urlencode("https://${local.app_host}/")}" : ""
+  }
+
+  # ALB auth has no logout of its own: the app expires the ALB cookie, then
+  # sends the browser to Cognito's logout, which returns to the env's host.
+  auth_logout_urls = {
+    for env, host in local.app_hosts : env => (
+      var.enable_auth ? "https://${local.cognito_domain}/logout?client_id=${local.alb_client_id}&logout_uri=${urlencode("https://${host}/")}" : ""
+    )
   }
 }

@@ -1,0 +1,49 @@
+# Start the PROD cluster (same account, own VPC / database / EKS: sunshine-prod).
+# The same Terraform stacks as lab-up, with prod.tfvars and their own state:
+#   1. platform      -> prod/platform.tfstate      (VPC, RDS, EKS sunshine-prod)
+#   2. platform-k8s  -> prod/platform-k8s.tfstate  (controllers, Argo CD -> env/prod)
+#   3. smoke test    -> https://prod.simptechit.click (reachable, sign-in, WAF)
+# The app version is whatever env/prod points at (moved by deliver.yml after an
+# approved release). A brand-new cluster needs env/prod to exist first.
+name: prod-up
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  apply:
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      stack: terraform/envs/lab/platform
+      command: apply
+      var_file: prod.tfvars
+      state_key: prod/platform.tfstate
+
+  apply-k8s:
+    needs: apply
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      stack: terraform/envs/lab/platform-k8s
+      command: apply
+      var_file: prod.tfvars
+      state_key: prod/platform-k8s.tfstate
+      skip_if_no_cluster: sunshine-prod
+
+  smoke:
+    name: smoke test (prod)
+    needs: apply-k8s
+    if: needs.apply-k8s.outputs.app_url != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - run: .github/scripts/smoke.sh "${{ needs.apply-k8s.outputs.app_url }}" "" auth,waf

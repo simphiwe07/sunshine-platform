@@ -1,4 +1,6 @@
-# App image pipeline: test -> lint -> build -> scan -> push (main only).
+# App checks for pull requests: test -> lint -> build -> scan -> container test.
+# Images are pushed and deployed by deliver.yml (develop -> dev,
+# release/* -> staging, main -> prod); the main-only steps below no longer run.
 #
 # Pull requests run everything except the push, with no AWS credentials at all.
 # On main, the exact image that passed the scan is pushed - it is never rebuilt,
@@ -10,11 +12,6 @@ name: app
 
 on:
   pull_request:
-    paths:
-      - "app/**"
-      - ".github/workflows/app.yml"
-  push:
-    branches: [main]
     paths:
       - "app/**"
       - ".github/workflows/app.yml"

@@ -1,15 +1,11 @@
 output "app_url" {
-  description = "App behind the ALB (Ingress). Read by the lab-up smoke test."
-  value       = "https://${local.app_host}"
+  description = "First environment's URL - read by the lab-up smoke test (reachability, sign-in, WAF)."
+  value       = "https://${values(local.app_hosts)[0]}"
 }
 
-output "nlb_url" {
-  value = local.nlb_host == "" ? null : "https://${local.nlb_host}"
-}
-
-output "app_version" {
-  description = "Git SHA of the image Git says is deployed (values-lab.yaml)."
-  value       = try([for t in data.aws_ecr_image.app.image_tags : t if length(t) == 40][0], null)
+output "app_urls" {
+  description = "Every environment on this cluster."
+  value       = { for env, host in local.app_hosts : env => "https://${host}" }
 }
 
 output "cluster_name" {

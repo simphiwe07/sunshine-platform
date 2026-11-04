@@ -24,9 +24,9 @@ Also useful: *Kubernetes / Compute Resources / Namespace (Pods)* and *Node Expor
 ## Watch (one terminal each)
 
 ```bash
-kubectl -n sunshine get hpa -w                                   # TARGETS cpu: x%/60%, REPLICAS
+kubectl -n sunshine-dev get hpa -w                                   # TARGETS cpu: x%/60%, REPLICAS
 kubectl get nodes -L eks.amazonaws.com/capacityType -w           # nodes joining / leaving
-kubectl -n sunshine get pods -o wide -w | grep -E 'Pending|Running'
+kubectl -n sunshine-dev get pods -o wide -w | grep -E 'Pending|Running'
 kubectl -n kube-system logs -l app.kubernetes.io/name=aws-cluster-autoscaler -f --tail=20 \
   | grep -iE 'scale-up|scale_up|scaled up|unneeded|scale-down|removing'
 ```

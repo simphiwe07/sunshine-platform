@@ -31,7 +31,10 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
-VERSION = os.getenv("APP_VERSION", "dev")
+VERSION = os.getenv("APP_VERSION", "dev")  # baked in at build: app-<git tree hash of app/>
+# Set at deploy time: the commit the environment's pointer branch is on. Several
+# commits share one image when app/ didn't change (build once, promote).
+REVISION = os.getenv("DEPLOY_REVISION", "")
 
 app = FastAPI(title="sunshine-app", version=VERSION)
 
@@ -109,6 +112,7 @@ def root() -> dict:
     return {
         "service": "sunshine-app",
         "version": VERSION,
+        "revision": REVISION,
         "host": socket.gethostname(),
         **TASK,
     }
@@ -118,7 +122,7 @@ def root() -> dict:
 def healthz() -> dict:
     # version here too: "/" sits behind sign-in, /healthz is public, so the
     # post-deploy smoke test reads the deployed version from here.
-    return {"status": "ok", "version": VERSION}
+    return {"status": "ok", "version": VERSION, "revision": REVISION}
 
 
 @app.get("/readyz")
